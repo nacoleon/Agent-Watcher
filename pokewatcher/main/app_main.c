@@ -103,34 +103,21 @@ static void on_mood_changed(pw_mood_t old_mood, pw_mood_t new_mood)
     pw_renderer_set_mood(new_mood);
 }
 
-static void coordinator_task(void *arg)
+static void on_roster_change(const char *pokemon_id)
 {
-    ESP_LOGI(TAG, "Coordinator task started");
-    pw_event_t event;
+    ESP_LOGI(TAG, "Roster change: loading %s", pokemon_id);
+    pw_renderer_load_pokemon(pokemon_id);
+}
 
-    while (1) {
-        if (pw_event_receive(&event, 1000)) {
-            switch (event.type) {
-            case PW_EVENT_ROSTER_CHANGE:
-                pw_renderer_load_pokemon(event.data.roster.pokemon_id);
-                break;
-
-            case PW_EVENT_EVOLUTION_TRIGGERED: {
-                const char *active = pw_roster_get_active_id();
-                if (active) {
-                    pw_pokemon_def_t def;
-                    if (pw_pokemon_load_def(active, &def) && def.evolves_to[0] != '\0') {
-                        pw_roster_evolve_active();
-                        pw_renderer_play_evolution(def.evolves_to);
-                        ESP_LOGI(TAG, "Evolution complete: %s -> %s", active, def.evolves_to);
-                    }
-                }
-                break;
-            }
-
-            default:
-                break;
-            }
+static void on_evolution_triggered(void)
+{
+    const char *active = pw_roster_get_active_id();
+    if (active) {
+        pw_pokemon_def_t def;
+        if (pw_pokemon_load_def(active, &def) && def.evolves_to[0] != '\0') {
+            pw_roster_evolve_active();
+            pw_renderer_play_evolution(def.evolves_to);
+            ESP_LOGI(TAG, "Evolution complete: %s -> %s", active, def.evolves_to);
         }
     }
 }
@@ -181,15 +168,16 @@ void app_main(void)
     pw_web_server_start();
     ESP_LOGI(TAG, "[8/8] WiFi + web server initialized");
 
-    // Register mood change callback before starting tasks
+    // Register callbacks before starting tasks
     pw_mood_engine_set_change_cb(on_mood_changed);
+    pw_mood_engine_set_roster_cb(on_roster_change);
+    pw_mood_engine_set_evolution_cb(on_evolution_triggered);
 
     // Start all tasks
     pw_himax_task_start();
     pw_mood_engine_task_start();
     pw_llm_task_start();
     pw_renderer_task_start();
-    xTaskCreate(coordinator_task, "coordinator", 4096, NULL, 5, NULL);
 
     ESP_LOGI(TAG, "=== PokéWatcher v1 running ===");
     ESP_LOGI(TAG, "Active Pokemon: %s", active ? active : "none");

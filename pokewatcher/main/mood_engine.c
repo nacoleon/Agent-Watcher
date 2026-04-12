@@ -10,6 +10,8 @@ static const char *TAG = "pw_mood";
 static pw_mood_state_t s_state;
 static pw_mood_config_t s_config;
 static pw_mood_change_cb_t s_mood_change_cb = NULL;
+static pw_roster_change_cb_t s_roster_change_cb = NULL;
+static pw_evolution_cb_t s_evolution_cb = NULL;
 
 static int64_t now_ms(void)
 {
@@ -181,6 +183,16 @@ void pw_mood_engine_set_change_cb(pw_mood_change_cb_t cb)
     s_mood_change_cb = cb;
 }
 
+void pw_mood_engine_set_roster_cb(pw_roster_change_cb_t cb)
+{
+    s_roster_change_cb = cb;
+}
+
+void pw_mood_engine_set_evolution_cb(pw_evolution_cb_t cb)
+{
+    s_evolution_cb = cb;
+}
+
 static void notify_mood_change(pw_mood_t old_mood, pw_mood_t new_mood)
 {
     if (s_mood_change_cb) {
@@ -195,10 +207,28 @@ static void mood_engine_task(void *arg)
 
     while (1) {
         if (pw_event_receive(&event, 1000)) {
-            pw_mood_t old = s_state.current_mood;
-            pw_mood_engine_process_event(&event);
-            if (s_state.current_mood != old) {
-                notify_mood_change(old, s_state.current_mood);
+            switch (event.type) {
+            case PW_EVENT_PERSON_DETECTED:
+            case PW_EVENT_PERSON_LEFT: {
+                pw_mood_t old = s_state.current_mood;
+                pw_mood_engine_process_event(&event);
+                if (s_state.current_mood != old) {
+                    notify_mood_change(old, s_state.current_mood);
+                }
+                break;
+            }
+            case PW_EVENT_ROSTER_CHANGE:
+                if (s_roster_change_cb) {
+                    s_roster_change_cb(event.data.roster.pokemon_id);
+                }
+                break;
+            case PW_EVENT_EVOLUTION_TRIGGERED:
+                if (s_evolution_cb) {
+                    s_evolution_cb();
+                }
+                break;
+            default:
+                break;
             }
         }
         pw_mood_t old = s_state.current_mood;

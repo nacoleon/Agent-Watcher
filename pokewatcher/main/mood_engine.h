@@ -33,6 +33,12 @@ const char *pw_mood_to_string(pw_mood_t mood);
 
 typedef void (*pw_mood_change_cb_t)(pw_mood_t old_mood, pw_mood_t new_mood);
 void pw_mood_engine_set_change_cb(pw_mood_change_cb_t cb);
+
+typedef void (*pw_roster_change_cb_t)(const char *pokemon_id);
+typedef void (*pw_evolution_cb_t)(void);
+void pw_mood_engine_set_roster_cb(pw_roster_change_cb_t cb);
+void pw_mood_engine_set_evolution_cb(pw_evolution_cb_t cb);
+
 void pw_mood_engine_task_start(void);
 
 #endif
