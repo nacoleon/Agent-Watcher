@@ -9,7 +9,6 @@
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -23,7 +22,6 @@ static char s_history[PW_LLM_HISTORY_SIZE][PW_LLM_MAX_RESPONSE_LEN];
 static int s_history_index = 0;
 static int s_history_count = 0;
 
-static QueueHandle_t s_llm_queue = NULL;
 
 static void save_config(void)
 {
@@ -173,7 +171,6 @@ static bool call_llm(const char *prompt, char *response, int response_len)
 void pw_llm_init(void)
 {
     load_config();
-    s_llm_queue = xQueueCreate(4, sizeof(pw_event_t));
     ESP_LOGI(TAG, "LLM engine initialized (endpoint=%s)",
              s_config.endpoint[0] ? s_config.endpoint : "not configured");
 }

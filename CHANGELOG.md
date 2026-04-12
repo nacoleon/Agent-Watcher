@@ -18,3 +18,4 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 - **#9 Evolution progress not persisted**: `pw_roster_update_evolution()` was never called — evolution seconds tracked by mood engine were lost on reboot. Now syncs to roster NVS every 60 seconds and restores on boot.
 - **#10 First detection goes OVERJOYED**: On first boot (no person ever seen), detecting a person triggered OVERJOYED instead of EXCITED. Now checks `last_person_seen_ms == 0` to use EXCITED for the very first detection.
 - **#12 Partial HTTP reads**: `httpd_req_recv` may return fewer bytes than content-length. All three handler call sites now use `recv_full_body()` which loops until the full body is received.
+- **#14 Unused LLM queue**: `s_llm_queue` was created but never read from or written to. Removed dead code and unused include.
