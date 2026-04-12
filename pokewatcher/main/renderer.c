@@ -11,8 +11,9 @@
 
 static const char *TAG = "pw_renderer";
 
+static SemaphoreHandle_t s_render_mutex = NULL;
+
 static lv_obj_t *s_screen = NULL;
-// static lv_obj_t *s_bg_img = NULL;  // reserved for future background image
 static lv_obj_t *s_sprite_img = NULL;
 
 static pw_sprite_data_t s_sprite = {};
@@ -69,6 +70,8 @@ static void update_frame(void)
 
 void pw_renderer_init(void)
 {
+    s_render_mutex = xSemaphoreCreateMutex();
+
     const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     lvgl_port_init(&lvgl_cfg);
 
@@ -92,10 +95,13 @@ void pw_renderer_init(void)
 
 bool pw_renderer_load_pokemon(const char *pokemon_id)
 {
+    xSemaphoreTake(s_render_mutex, portMAX_DELAY);
+
     pw_sprite_free(&s_sprite);
 
     if (!pw_sprite_load(pokemon_id, &s_sprite)) {
         ESP_LOGE(TAG, "Failed to load sprites for %s", pokemon_id);
+        xSemaphoreGive(s_render_mutex);
         return false;
     }
 
@@ -103,12 +109,15 @@ bool pw_renderer_load_pokemon(const char *pokemon_id)
     s_current_frame = 0;
     update_frame();
 
+    xSemaphoreGive(s_render_mutex);
     ESP_LOGI(TAG, "Loaded Pokemon: %s", pokemon_id);
     return true;
 }
 
 void pw_renderer_set_mood(pw_mood_t mood)
 {
+    xSemaphoreTake(s_render_mutex, portMAX_DELAY);
+
     s_current_mood = mood;
 
     const pw_animation_t *new_anim = pw_sprite_get_mood_anim(&s_sprite, mood);
@@ -123,6 +132,7 @@ void pw_renderer_set_mood(pw_mood_t mood)
     }
     lvgl_port_unlock();
 
+    xSemaphoreGive(s_render_mutex);
     ESP_LOGI(TAG, "Mood visual set to: %s", pw_mood_to_string(mood));
 }
 
@@ -130,21 +140,27 @@ void pw_renderer_play_evolution(const char *new_pokemon_id)
 {
     ESP_LOGI(TAG, "Playing evolution animation...");
 
+    xSemaphoreTake(s_render_mutex, portMAX_DELAY);
+
     lvgl_port_lock(0);
     if (s_screen) {
         lv_obj_set_style_bg_color(s_screen, lv_color_white(), 0);
     }
     lvgl_port_unlock();
 
+    xSemaphoreGive(s_render_mutex);
+
     vTaskDelay(pdMS_TO_TICKS(1500));
 
     pw_renderer_load_pokemon(new_pokemon_id);
 
+    xSemaphoreTake(s_render_mutex, portMAX_DELAY);
     lvgl_port_lock(0);
     if (s_screen) {
         lv_obj_set_style_bg_color(s_screen, lv_color_hex(MOOD_BG_COLORS[s_current_mood]), 0);
     }
     lvgl_port_unlock();
+    xSemaphoreGive(s_render_mutex);
 }
 
 static void renderer_task(void *arg)
@@ -154,7 +170,9 @@ static void renderer_task(void *arg)
     TickType_t frame_delay = pdMS_TO_TICKS(1000 / PW_ANIM_FPS);
 
     while (1) {
+        xSemaphoreTake(s_render_mutex, portMAX_DELAY);
         update_frame();
+        xSemaphoreGive(s_render_mutex);
         vTaskDelay(frame_delay);
     }
 }
