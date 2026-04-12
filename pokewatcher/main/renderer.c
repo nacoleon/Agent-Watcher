@@ -2,6 +2,7 @@
 #include "config.h"
 #include "sprite_loader.h"
 #include "mood_engine.h"
+#include "sensecap-watcher.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
@@ -72,8 +73,13 @@ void pw_renderer_init(void)
 {
     s_render_mutex = xSemaphoreCreateMutex();
 
-    const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-    lvgl_port_init(&lvgl_cfg);
+    // Use BSP to initialize LCD hardware + LVGL display driver
+    lv_disp_t *disp = bsp_lvgl_init();
+    if (!disp) {
+        ESP_LOGE(TAG, "BSP LVGL init failed");
+        return;
+    }
+    bsp_lcd_brightness_set(80);
 
     lvgl_port_lock(0);
 

@@ -7,6 +7,9 @@
 #include "esp_netif.h"
 #include "nvs_flash.h"
 #include "sensecap-watcher.h"
+#include "driver/sdspi_host.h"
+#include "esp_vfs_fat.h"
+#include "sdmmc_cmd.h"
 
 #include "config.h"
 #include "event_queue.h"
@@ -72,12 +75,30 @@ static void init_wifi(void)
 
 static void init_sdcard(void)
 {
-    esp_err_t ret = bsp_sdcard_init_default();
+    // Initialize SPI bus and IO expander (needed for SD card power)
+    bsp_spi_bus_init();
+    bsp_io_expander_init();
+
+    // Mount SD card via SPI (same as bsp_sdcard_init but without ESP_ERROR_CHECK)
+    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    host.slot = BSP_SD_SPI_NUM;
+    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
+    slot_config.gpio_cs = BSP_SD_SPI_CS;
+    slot_config.host_id = host.slot;
+    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+        .format_if_mount_failed = false,
+        .max_files = 5,
+        .allocation_unit_size = 16 * 1024,
+    };
+
+    sdmmc_card_t *card = NULL;
+    esp_err_t ret = esp_vfs_fat_sdspi_mount(PW_SD_MOUNT_POINT, &host, &slot_config, &mount_config, &card);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(ret));
         ESP_LOGW(TAG, "Continuing without SD card — sprites won't load");
     } else {
-        ESP_LOGI(TAG, "SD card mounted");
+        ESP_LOGI(TAG, "SD card mounted at %s", PW_SD_MOUNT_POINT);
+        sdmmc_card_print_info(stdout, card);
     }
 }
 
