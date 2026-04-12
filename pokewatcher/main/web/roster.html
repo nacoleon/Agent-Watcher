@@ -28,8 +28,9 @@
             const grid = document.getElementById('roster-grid');
             grid.innerHTML = d.entries.map(e =>
                 '<div class="pokemon-card' + (e.id === d.active_id ? ' active' : '') + '">' +
+                '<div class="sprite-thumb"><canvas class="sprite-canvas-sm" data-pokemon="' + e.id + '" width="64" height="64"></canvas></div>' +
                 '<strong>' + escHtml(e.name || e.id) + '</strong>' +
-                (e.evolves_to ? '<div class="evolves">-> ' + escHtml(e.evolves_to) + '</div>' : '') +
+                (e.evolves_to ? '<div class="evolves">&rarr; ' + escHtml(e.evolves_to) + '</div>' : '') +
                 '<div class="actions">' +
                 (e.id !== d.active_id ? '<button onclick="setActive(\'' + e.id + '\')">Select</button>' : '<span class="badge">Active</span>') +
                 '<button class="danger" onclick="removePokemon(\'' + e.id + '\')">Remove</button>' +
@@ -39,10 +40,43 @@
             const avail = document.getElementById('available-grid');
             avail.innerHTML = d.available.map(id =>
                 '<div class="pokemon-card available">' +
+                '<div class="sprite-thumb"><canvas class="sprite-canvas-sm" data-pokemon="' + id + '" width="64" height="64"></canvas></div>' +
                 '<strong>' + escHtml(id) + '</strong>' +
                 '<button onclick="addPokemon(\'' + id + '\')">Add</button>' +
                 '</div>'
             ).join('');
+
+            // Animate sprite thumbnails with walk cycle
+            document.querySelectorAll('.sprite-canvas-sm').forEach(async canvas => {
+                const pid = canvas.dataset.pokemon;
+                const img = new Image();
+                img.src = '/sprites/' + pid;
+                let fdata = null;
+                try {
+                    const r = await fetch('/frames/' + pid);
+                    fdata = await r.json();
+                } catch(e) {}
+                img.onload = () => {
+                    let frame = 0;
+                    const anim = fdata && fdata.animations && fdata.animations.walk_down;
+                    const fw = fdata ? fdata.frame_width : 32;
+                    const fh = fdata ? fdata.frame_height : 32;
+                    function draw() {
+                        const ctx = canvas.getContext('2d');
+                        ctx.clearRect(0, 0, 64, 64);
+                        ctx.imageSmoothingEnabled = false;
+                        if (anim) {
+                            const f = anim.frames[frame % anim.frames.length];
+                            ctx.drawImage(img, f.x, f.y, fw, fh, 0, 0, 64, 64);
+                            frame++;
+                        } else {
+                            ctx.drawImage(img, 0, 0, fw, fh, 0, 0, 64, 64);
+                        }
+                    }
+                    draw();
+                    setInterval(draw, 250);
+                };
+            });
         }
         async function setActive(id) { await fetch('/api/roster/active', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) }); loadRoster(); }
         async function addPokemon(id) { await fetch('/api/roster', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) }); loadRoster(); }

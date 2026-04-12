@@ -10,3 +10,4 @@ pokewatcher/sdkconfig.old
 
 # Vendored SDK (cloned separately)
 SenseCAP-Watcher-Firmware/
+.gstack/
