@@ -37,8 +37,15 @@ static bool load_frame_manifest(const char *pokemon_id, pw_sprite_data_t *sprite
         return false;
     }
 
-    sprite->frame_width = (uint16_t)cJSON_GetObjectItem(root, "frame_width")->valuedouble;
-    sprite->frame_height = (uint16_t)cJSON_GetObjectItem(root, "frame_height")->valuedouble;
+    cJSON *fw = cJSON_GetObjectItem(root, "frame_width");
+    cJSON *fh = cJSON_GetObjectItem(root, "frame_height");
+    if (!fw || !fh) {
+        ESP_LOGE(TAG, "Missing frame_width/frame_height in frames.json");
+        cJSON_Delete(root);
+        return false;
+    }
+    sprite->frame_width = (uint16_t)fw->valuedouble;
+    sprite->frame_height = (uint16_t)fh->valuedouble;
 
     cJSON *anims = cJSON_GetObjectItem(root, "animations");
     sprite->animation_count = 0;
@@ -57,8 +64,11 @@ static bool load_frame_manifest(const char *pokemon_id, pw_sprite_data_t *sprite
         cJSON *frame_j = NULL;
         cJSON_ArrayForEach(frame_j, frames_arr) {
             if (anim->frame_count >= PW_MAX_FRAMES_PER_ANIM) break;
-            anim->frames[anim->frame_count].x = (uint16_t)cJSON_GetObjectItem(frame_j, "x")->valuedouble;
-            anim->frames[anim->frame_count].y = (uint16_t)cJSON_GetObjectItem(frame_j, "y")->valuedouble;
+            cJSON *fx = cJSON_GetObjectItem(frame_j, "x");
+            cJSON *fy = cJSON_GetObjectItem(frame_j, "y");
+            if (!fx || !fy) continue;
+            anim->frames[anim->frame_count].x = (uint16_t)fx->valuedouble;
+            anim->frames[anim->frame_count].y = (uint16_t)fy->valuedouble;
             anim->frame_count++;
         }
         sprite->animation_count++;
@@ -137,7 +147,7 @@ void pw_sprite_free(pw_sprite_data_t *sprite)
 
 const pw_animation_t *pw_sprite_get_mood_anim(const pw_sprite_data_t *sprite, pw_mood_t mood)
 {
-    if (mood < 0 || mood > 5) return NULL;
+    if (mood >= 6) return NULL;
     const char *anim_name = sprite->mood_anim_names[mood];
     if (anim_name[0] == '\0') return NULL;
 
@@ -166,8 +176,10 @@ uint16_t *pw_sprite_extract_frame_scaled(const pw_sprite_data_t *sprite,
 
     for (uint16_t dy = 0; dy < dst_h; dy++) {
         uint16_t sy = coord->y + (dy / scale);
+        if (sy >= sprite->sheet_height) sy = sprite->sheet_height - 1;
         for (uint16_t dx = 0; dx < dst_w; dx++) {
             uint16_t sx = coord->x + (dx / scale);
+            if (sx >= sprite->sheet_width) sx = sprite->sheet_width - 1;
             buf[dy * dst_w + dx] = sheet[sy * sprite->sheet_width + sx];
         }
     }
