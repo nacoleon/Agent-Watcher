@@ -1,0 +1,33 @@
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "event_queue.c"
+        "himax_task.c"
+        "mood_engine.c"
+        "renderer.c"
+        "sprite_loader.c"
+        "llm_task.c"
+        "web_server.c"
+        "roster.c"
+    INCLUDE_DIRS "."
+    REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_http_server
+        esp_http_client
+        esp_lcd_touch_chsc6x
+        esp_lvgl_port
+        lvgl
+        sscma_client
+        esp_jpeg_simd
+        json
+        fatfs
+        sdmmc
+        mdns
+    EMBED_FILES
+        "web/index.html"
+        "web/roster.html"
+        "web/settings.html"
+        "web/style.css"
+        "web/app.js"
+)
