@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PokéWatcher - Settings</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <nav>
+        <a href="/">Status</a>
+        <a href="/roster">Roster</a>
+        <a href="/settings" class="active">Settings</a>
+    </nav>
+    <main>
+        <h1>Settings</h1>
+
+        <section>
+            <h2>LLM Configuration</h2>
+            <label>API Endpoint<input type="text" id="llm-endpoint" placeholder="https://api.openai.com/v1/chat/completions"></label>
+            <label>API Key<input type="password" id="llm-key" placeholder="sk-..."></label>
+            <label>Model<input type="text" id="llm-model" placeholder="gpt-4o-mini"></label>
+        </section>
+
+        <section>
+            <h2>Mood Timers</h2>
+            <label>Curious timeout (minutes)<input type="number" id="curious-min" min="1" max="60"></label>
+            <label>Lonely timeout (minutes)<input type="number" id="lonely-min" min="1" max="120"></label>
+            <label>Excited duration (seconds)<input type="number" id="excited-sec" min="1" max="60"></label>
+            <label>Overjoyed duration (seconds)<input type="number" id="overjoyed-sec" min="1" max="60"></label>
+        </section>
+
+        <button id="save-btn" onclick="saveSettings()">Save Settings</button>
+        <div id="save-status"></div>
+    </main>
+    <script src="/app.js"></script>
+    <script>
+        async function loadSettings() {
+            const res = await fetch('/api/settings');
+            const d = await res.json();
+            document.getElementById('llm-endpoint').value = d.llm.endpoint || '';
+            document.getElementById('llm-model').value = d.llm.model || '';
+            document.getElementById('llm-key').placeholder = d.llm.api_key_set ? '(key set)' : 'sk-...';
+            document.getElementById('curious-min').value = Math.round(d.mood.curious_timeout_ms / 60000);
+            document.getElementById('lonely-min').value = Math.round(d.mood.lonely_timeout_ms / 60000);
+            document.getElementById('excited-sec').value = Math.round(d.mood.excited_duration_ms / 1000);
+            document.getElementById('overjoyed-sec').value = Math.round(d.mood.overjoyed_duration_ms / 1000);
+        }
+        async function saveSettings() {
+            const body = {
+                llm: {
+                    endpoint: document.getElementById('llm-endpoint').value,
+                    model: document.getElementById('llm-model').value,
+                },
+                mood: {
+                    curious_timeout_ms: parseInt(document.getElementById('curious-min').value) * 60000,
+                    lonely_timeout_ms: parseInt(document.getElementById('lonely-min').value) * 60000,
+                    excited_duration_ms: parseInt(document.getElementById('excited-sec').value) * 1000,
+                    overjoyed_duration_ms: parseInt(document.getElementById('overjoyed-sec').value) * 1000,
+                }
+            };
+            const key = document.getElementById('llm-key').value;
+            if (key) body.llm.api_key = key;
+            const res = await fetch('/api/settings', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+            document.getElementById('save-status').textContent = res.ok ? 'Saved!' : 'Error';
+            setTimeout(() => document.getElementById('save-status').textContent = '', 2000);
+        }
+        loadSettings();
+    </script>
+</body>
+</html>

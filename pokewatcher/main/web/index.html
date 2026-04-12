@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PokéWatcher</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <nav>
+        <a href="/" class="active">Status</a>
+        <a href="/roster">Roster</a>
+        <a href="/settings">Settings</a>
+    </nav>
+    <main>
+        <h1 id="pokemon-name">Loading...</h1>
+        <div class="mood-badge" id="mood-badge">--</div>
+        <div class="status-card">
+            <div class="stat">
+                <span class="label">Person</span>
+                <span id="person-status">--</span>
+            </div>
+            <div class="stat">
+                <span class="label">Evolution</span>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="evo-bar"></div>
+                </div>
+                <span id="evo-text">--</span>
+            </div>
+        </div>
+        <h2>Commentary</h2>
+        <div id="timeline"></div>
+    </main>
+    <script src="/app.js"></script>
+    <script>
+        async function updateStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const d = await res.json();
+                document.getElementById('pokemon-name').textContent = d.active_pokemon || 'No Pokemon';
+                document.getElementById('mood-badge').textContent = d.mood;
+                document.getElementById('mood-badge').className = 'mood-badge mood-' + d.mood;
+                document.getElementById('person-status').textContent = d.person_present ? 'Here' : 'Away';
+                const hours = (d.evolution_seconds / 3600).toFixed(1);
+                const threshold = d.evolution_threshold_hours || 24;
+                const pct = Math.min(100, (d.evolution_seconds / (threshold * 3600)) * 100);
+                document.getElementById('evo-bar').style.width = pct + '%';
+                document.getElementById('evo-text').textContent = hours + 'h / ' + threshold + 'h';
+
+                const tRes = await fetch('/api/timeline');
+                const timeline = await tRes.json();
+                const el = document.getElementById('timeline');
+                el.innerHTML = timeline.map(t => '<div class="comment">' + escHtml(t) + '</div>').join('');
+            } catch(e) { console.error(e); }
+        }
+        function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+        updateStatus();
+        setInterval(updateStatus, 5000);
+    </script>
+</body>
+</html>

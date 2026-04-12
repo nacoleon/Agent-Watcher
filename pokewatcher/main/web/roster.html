@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PokéWatcher - Roster</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <nav>
+        <a href="/">Status</a>
+        <a href="/roster" class="active">Roster</a>
+        <a href="/settings">Settings</a>
+    </nav>
+    <main>
+        <h1>Your Pokemon</h1>
+        <div id="roster-grid" class="roster-grid"></div>
+
+        <h2>Available on SD Card</h2>
+        <div id="available-grid" class="roster-grid"></div>
+    </main>
+    <script src="/app.js"></script>
+    <script>
+        async function loadRoster() {
+            const res = await fetch('/api/roster');
+            const d = await res.json();
+
+            const grid = document.getElementById('roster-grid');
+            grid.innerHTML = d.entries.map(e =>
+                '<div class="pokemon-card' + (e.id === d.active_id ? ' active' : '') + '">' +
+                '<strong>' + escHtml(e.name || e.id) + '</strong>' +
+                (e.evolves_to ? '<div class="evolves">-> ' + escHtml(e.evolves_to) + '</div>' : '') +
+                '<div class="actions">' +
+                (e.id !== d.active_id ? '<button onclick="setActive(\'' + e.id + '\')">Select</button>' : '<span class="badge">Active</span>') +
+                '<button class="danger" onclick="removePokemon(\'' + e.id + '\')">Remove</button>' +
+                '</div></div>'
+            ).join('');
+
+            const avail = document.getElementById('available-grid');
+            avail.innerHTML = d.available.map(id =>
+                '<div class="pokemon-card available">' +
+                '<strong>' + escHtml(id) + '</strong>' +
+                '<button onclick="addPokemon(\'' + id + '\')">Add</button>' +
+                '</div>'
+            ).join('');
+        }
+        async function setActive(id) { await fetch('/api/roster/active', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) }); loadRoster(); }
+        async function addPokemon(id) { await fetch('/api/roster', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({id}) }); loadRoster(); }
+        async function removePokemon(id) { if(confirm('Remove ' + id + '?')) { await fetch('/api/roster/' + id, { method: 'DELETE' }); loadRoster(); } }
+        function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+        loadRoster();
+    </script>
+</body>
+</html>
