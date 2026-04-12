@@ -15,3 +15,4 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 - **#11 Path traversal in web API**: Pokemon IDs from HTTP requests were used directly in file paths. Added `is_valid_pokemon_id()` to reject anything not `[a-z0-9_-]`.
 - **#7 NVS blob versioning**: Roster and LLM config blobs loaded from NVS without size validation — struct layout changes between firmware versions would produce garbage. Added size checks; mismatches reset to defaults.
 - **#8 Mood config not persisted**: Mood timer settings (curious/lonely/excited/overjoyed durations) were only stored in memory. Rebooting reset them to compile-time defaults. Now saved to NVS on change and loaded on boot.
+- **#9 Evolution progress not persisted**: `pw_roster_update_evolution()` was never called — evolution seconds tracked by mood engine were lost on reboot. Now syncs to roster NVS every 60 seconds and restores on boot.

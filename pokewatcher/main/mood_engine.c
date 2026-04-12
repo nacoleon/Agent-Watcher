@@ -1,15 +1,19 @@
 #include "mood_engine.h"
+#include "roster.h"
 #include "config.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <string.h>
 
 static const char *TAG = "pw_mood";
 
 static pw_mood_state_t s_state;
 static pw_mood_config_t s_config;
+static uint32_t s_last_persisted_evo_secs = 0;
+#define PW_EVO_PERSIST_INTERVAL_SECS 60
 static pw_mood_change_cb_t s_mood_change_cb = NULL;
 static pw_roster_change_cb_t s_roster_change_cb = NULL;
 static pw_evolution_cb_t s_evolution_cb = NULL;
@@ -77,6 +81,20 @@ void pw_mood_engine_init(void)
     };
 
     load_mood_config();
+
+    // Restore evolution progress from roster
+    pw_roster_t roster = pw_roster_get();
+    const char *active = pw_roster_get_active_id();
+    if (active) {
+        for (int i = 0; i < roster.count; i++) {
+            if (strcmp(roster.entries[i].id, active) == 0) {
+                s_state.evolution_seconds = roster.entries[i].evolution_seconds;
+                s_last_persisted_evo_secs = s_state.evolution_seconds;
+                ESP_LOGI(TAG, "Restored evolution progress: %lu seconds", (unsigned long)s_state.evolution_seconds);
+                break;
+            }
+        }
+    }
 
     ESP_LOGI(TAG, "Mood engine initialized (starting in SLEEPY)");
 }
@@ -162,11 +180,19 @@ bool pw_mood_engine_tick(void)
         s_state.evolution_seconds += elapsed;
         s_state.evolution_last_tick_ms = now;
 
+        // Persist evolution progress every 60 seconds
+        if (s_state.evolution_seconds - s_last_persisted_evo_secs >= PW_EVO_PERSIST_INTERVAL_SECS) {
+            pw_roster_update_evolution(s_state.evolution_seconds);
+            pw_roster_save();
+            s_last_persisted_evo_secs = s_state.evolution_seconds;
+        }
+
         uint32_t threshold_seconds = s_config.evolution_threshold_hours * 3600;
         if (threshold_seconds > 0 && s_state.evolution_seconds >= threshold_seconds) {
             pw_event_t evt = { .type = PW_EVENT_EVOLUTION_TRIGGERED };
             pw_event_send(&evt);
             s_state.evolution_seconds = 0;
+            s_last_persisted_evo_secs = 0;
         }
     }
 
