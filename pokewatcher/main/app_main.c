@@ -75,13 +75,26 @@ static void init_wifi(void)
 
 static void init_sdcard(void)
 {
-    // Initialize SPI bus and IO expander (needed for SD card power)
+    // SPI bus and IO expander must be initialized first (BSP handles power to SD slot)
+    // These are idempotent — safe to call even if bsp_lvgl_init already called them
     bsp_spi_bus_init();
     bsp_io_expander_init();
 
+    // Enable debug logging for SD card diagnosis
+    esp_log_level_set("sdmmc_sd", ESP_LOG_DEBUG);
+    esp_log_level_set("sdmmc_cmd", ESP_LOG_DEBUG);
+    esp_log_level_set("sdspi_host", ESP_LOG_DEBUG);
+    esp_log_level_set("sdspi_transaction", ESP_LOG_DEBUG);
+    esp_log_level_set("vfs_fat_sdmmc", ESP_LOG_DEBUG);
+
+    // Give the SD card time to power up after IO expander enables it
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // Try to mount regardless of detect pin — some cards don't trigger it
     // Mount SD card via SPI (same as bsp_sdcard_init but without ESP_ERROR_CHECK)
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     host.slot = BSP_SD_SPI_NUM;
+    host.max_freq_khz = 400;  // Slow down for old SD v1 cards
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_config.gpio_cs = BSP_SD_SPI_CS;
     slot_config.host_id = host.slot;
@@ -94,7 +107,7 @@ static void init_sdcard(void)
     sdmmc_card_t *card = NULL;
     esp_err_t ret = esp_vfs_fat_sdspi_mount(PW_SD_MOUNT_POINT, &host, &slot_config, &mount_config, &card);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to mount SD card: %s (0x%x)", esp_err_to_name(ret), ret);
         ESP_LOGW(TAG, "Continuing without SD card — sprites won't load");
     } else {
         ESP_LOGI(TAG, "SD card mounted at %s", PW_SD_MOUNT_POINT);
@@ -140,33 +153,35 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
     ESP_LOGI(TAG, "[1/8] NVS initialized");
 
-    // 2. Mount SD card
-    init_sdcard();
-    ESP_LOGI(TAG, "[2/8] SD card initialized");
-
-    // 3. Initialize event queue
+    // 2. Initialize event queue
     pw_event_queue_init();
-    ESP_LOGI(TAG, "[3/8] Event queue initialized");
+    ESP_LOGI(TAG, "[2/8] Event queue initialized");
 
-    // 4. Initialize roster
+    // 3. Initialize roster (loads from NVS, SD card not needed yet)
     pw_roster_init();
-    ESP_LOGI(TAG, "[4/8] Roster initialized");
+    ESP_LOGI(TAG, "[3/8] Roster initialized");
 
-    // 5. Initialize mood engine
+    // 4. Initialize mood engine
     pw_mood_engine_init();
-    ESP_LOGI(TAG, "[5/8] Mood engine initialized");
+    ESP_LOGI(TAG, "[4/8] Mood engine initialized");
 
-    // 6. Initialize LLM
+    // 5. Initialize LLM
     pw_llm_init();
-    ESP_LOGI(TAG, "[6/8] LLM engine initialized");
+    ESP_LOGI(TAG, "[5/8] LLM engine initialized");
 
-    // 7. Initialize display & renderer
+    // 6. Initialize display & renderer (also inits SPI bus + IO expander via BSP)
     pw_renderer_init();
+    ESP_LOGI(TAG, "[6/8] Renderer initialized");
+
+    // 7. Mount SD card (after renderer, so BSP SPI bus is fully set up)
+    init_sdcard();
+    ESP_LOGI(TAG, "[7/8] SD card initialized");
+
+    // Load active Pokemon sprites if roster has one
     const char *active = pw_roster_get_active_id();
     if (active) {
         pw_renderer_load_pokemon(active);
     }
-    ESP_LOGI(TAG, "[7/8] Renderer initialized");
 
     // 8. Initialize WiFi & start web server
     init_wifi();
