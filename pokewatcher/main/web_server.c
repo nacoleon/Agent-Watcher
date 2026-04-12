@@ -13,6 +13,24 @@
 static const char *TAG = "pw_web";
 static httpd_handle_t s_server = NULL;
 
+static int recv_full_body(httpd_req_t *req, char *buf, int buf_size)
+{
+    int content_len = req->content_len;
+    if (content_len <= 0 || content_len >= buf_size) {
+        return -1;
+    }
+    int received = 0;
+    while (received < content_len) {
+        int ret = httpd_req_recv(req, buf + received, content_len - received);
+        if (ret <= 0) {
+            return -1;
+        }
+        received += ret;
+    }
+    buf[received] = '\0';
+    return received;
+}
+
 static bool is_valid_pokemon_id(const char *id)
 {
     if (!id || id[0] == '\0') return false;
@@ -125,12 +143,10 @@ static esp_err_t handle_api_roster_get(httpd_req_t *req)
 static esp_err_t handle_api_roster_add(httpd_req_t *req)
 {
     char buf[128];
-    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+    if (recv_full_body(req, buf, sizeof(buf)) < 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body or too large");
         return ESP_FAIL;
     }
-    buf[ret] = '\0';
 
     cJSON *root = cJSON_Parse(buf);
     if (!root) {
@@ -183,12 +199,10 @@ static esp_err_t handle_api_roster_delete(httpd_req_t *req)
 static esp_err_t handle_api_roster_active(httpd_req_t *req)
 {
     char buf[128];
-    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+    if (recv_full_body(req, buf, sizeof(buf)) < 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body or too large");
         return ESP_FAIL;
     }
-    buf[ret] = '\0';
 
     cJSON *root = cJSON_Parse(buf);
     if (!root) {
@@ -247,9 +261,11 @@ static esp_err_t handle_api_settings_put(httpd_req_t *req)
 {
     char *buf = malloc(1024);
     if (!buf) return ESP_FAIL;
-    int ret = httpd_req_recv(req, buf, 1023);
-    if (ret <= 0) { free(buf); return ESP_FAIL; }
-    buf[ret] = '\0';
+    if (recv_full_body(req, buf, 1024) < 0) {
+        free(buf);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body or too large");
+        return ESP_FAIL;
+    }
 
     cJSON *root = cJSON_Parse(buf);
     free(buf);
