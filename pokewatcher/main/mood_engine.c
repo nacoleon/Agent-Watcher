@@ -106,12 +106,16 @@ bool pw_mood_engine_process_event(const pw_event_t *event)
     switch (event->type) {
     case PW_EVENT_PERSON_DETECTED:
         s_state.person_present = true;
-        s_state.last_person_seen_ms = now_ms();
 
         switch (s_state.current_mood) {
         case PW_MOOD_SLEEPY:
         case PW_MOOD_LONELY:
-            set_mood(PW_MOOD_OVERJOYED);
+            if (s_state.last_person_seen_ms == 0) {
+                // First person detection ever — use EXCITED per spec
+                set_mood(PW_MOOD_EXCITED);
+            } else {
+                set_mood(PW_MOOD_OVERJOYED);
+            }
             break;
         case PW_MOOD_CURIOUS:
             set_mood(PW_MOOD_HAPPY);
@@ -121,6 +125,7 @@ bool pw_mood_engine_process_event(const pw_event_t *event)
         case PW_MOOD_OVERJOYED:
             break;
         }
+        s_state.last_person_seen_ms = now_ms();
         break;
 
     case PW_EVENT_PERSON_LEFT:
