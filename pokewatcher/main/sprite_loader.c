@@ -5,12 +5,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 
 static const char *TAG = "pw_sprite";
 
 static bool load_frame_manifest(const char *pokemon_id, pw_sprite_data_t *sprite)
 {
-    char path[128];
+    char path[300];
     snprintf(path, sizeof(path), "%s/%s/frames.json", PW_SD_POKEMON_DIR, pokemon_id);
 
     FILE *f = fopen(path, "r");
@@ -82,7 +83,7 @@ static bool load_frame_manifest(const char *pokemon_id, pw_sprite_data_t *sprite
 
 static bool load_sprite_sheet(const char *pokemon_id, pw_sprite_data_t *sprite)
 {
-    char path[128];
+    char path[300];
     snprintf(path, sizeof(path), "%s/%s/overworld.raw", PW_SD_POKEMON_DIR, pokemon_id);
 
     FILE *f = fopen(path, "rb");
@@ -114,7 +115,7 @@ static bool load_sprite_sheet(const char *pokemon_id, pw_sprite_data_t *sprite)
         return false;
     }
 
-    ESP_LOGI(TAG, "Loaded sprite sheet %ux%u (%zu bytes)", sprite->sheet_width, sprite->sheet_height, data_size);
+    ESP_LOGI(TAG, "Loaded sprite sheet %"PRIu32"x%"PRIu32" (%zu bytes)", sprite->sheet_width, sprite->sheet_height, data_size);
     return true;
 }
 

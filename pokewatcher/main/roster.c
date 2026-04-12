@@ -48,7 +48,7 @@ static void roster_load(void)
 
 bool pw_pokemon_load_def(const char *pokemon_id, pw_pokemon_def_t *def)
 {
-    char path[128];
+    char path[300];
     snprintf(path, sizeof(path), "%s/%s/pokemon.json", PW_SD_POKEMON_DIR, pokemon_id);
 
     FILE *f = fopen(path, "r");
@@ -126,7 +126,7 @@ int pw_pokemon_scan_available(char ids[][PW_POKEMON_ID_LEN], int max_count)
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL && count < max_count) {
         if (entry->d_type == DT_DIR && entry->d_name[0] != '.') {
-            char check_path[128];
+            char check_path[300];
             snprintf(check_path, sizeof(check_path), "%s/%s/pokemon.json", PW_SD_POKEMON_DIR, entry->d_name);
             struct stat st;
             if (stat(check_path, &st) == 0) {

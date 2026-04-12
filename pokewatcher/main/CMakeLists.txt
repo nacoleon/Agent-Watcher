@@ -24,6 +24,10 @@ idf_component_register(
         fatfs
         sdmmc
         mdns
+        sensecap-watcher
+        esp_io_expander_pca95xx_16bit
+        esp_timer
+        driver
     EMBED_FILES
         "web/index.html"
         "web/roster.html"

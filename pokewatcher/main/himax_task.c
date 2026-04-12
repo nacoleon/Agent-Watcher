@@ -4,8 +4,9 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "sscma_client_io.h"
+#include "sensecap-watcher.h"
 #include "sscma_client_ops.h"
+#include "sscma_client_types.h"
 
 static const char *TAG = "pw_himax";
 
@@ -38,62 +39,59 @@ static void process_detection(bool person_detected)
     }
 }
 
+// Callback fired when the SSCMA client receives detection events from Himax
+static void on_event(sscma_client_handle_t client, const sscma_client_reply_t *reply, void *user_ctx)
+{
+    sscma_client_box_t *boxes = NULL;
+    int num_boxes = 0;
+
+    esp_err_t err = sscma_utils_fetch_boxes_from_reply(reply, &boxes, &num_boxes);
+    if (err != ESP_OK || boxes == NULL || num_boxes == 0) {
+        process_detection(false);
+        return;
+    }
+
+    // Check if any detected box is a person (target 0 = person in COCO)
+    bool found_person = false;
+    for (int i = 0; i < num_boxes; i++) {
+        if (boxes[i].target == 0 && boxes[i].score > 60) {
+            found_person = true;
+            break;
+        }
+    }
+    process_detection(found_person);
+    free(boxes);
+}
+
 static void himax_task(void *arg)
 {
     ESP_LOGI(TAG, "Himax task started, initializing SSCMA client...");
 
-    sscma_client_handle_t client = NULL;
-    sscma_client_io_handle_t io = NULL;
+    // Use BSP function — handles SPI bus, IO expander, GPIO, and reset
+    sscma_client_handle_t client = bsp_sscma_client_init();
+    if (client == NULL) {
+        ESP_LOGE(TAG, "Failed to initialize SSCMA client");
+        vTaskDelete(NULL);
+        return;
+    }
 
-    sscma_client_io_uart_config_t uart_config = {
-        .port = UART_NUM_1,
-        .baud_rate = 921600,
-        .tx_pin = 21,
-        .rx_pin = 20,
-        .rx_buffer_size = 4096,
-        .tx_buffer_size = 1024,
+    // Register callback for detection events
+    sscma_client_callback_t callback = {
+        .on_event = on_event,
     };
+    sscma_client_register_callback(client, &callback, NULL);
 
-    esp_err_t err = sscma_client_new_io_uart_bus(&uart_config, &io);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create SSCMA UART IO: %s", esp_err_to_name(err));
-        vTaskDelete(NULL);
-        return;
-    }
-
-    sscma_client_config_t client_config = SSCMA_CLIENT_CONFIG_DEFAULT();
-    err = sscma_client_new(io, &client_config, &client);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create SSCMA client: %s", esp_err_to_name(err));
-        vTaskDelete(NULL);
-        return;
-    }
-
+    // Wait for Himax to boot (it outputs noise initially)
     vTaskDelay(pdMS_TO_TICKS(3000));
 
+    // Start continuous inference on the Himax chip
     sscma_client_invoke(client, -1, false, false);
 
     ESP_LOGI(TAG, "Himax detection running");
 
+    // Keep task alive — callbacks handle detection events
     while (1) {
-        sscma_client_reply_t reply = {};
-        err = sscma_client_get_invoke(client, &reply, pdMS_TO_TICKS(500));
-
-        if (err == ESP_OK && reply.boxes != NULL) {
-            bool found_person = false;
-            for (int i = 0; i < reply.box_count; i++) {
-                if (reply.boxes[i].target == 0 && reply.boxes[i].score > 60) {
-                    found_person = true;
-                    break;
-                }
-            }
-            process_detection(found_person);
-            sscma_client_reply_clear(&reply);
-        } else {
-            process_detection(false);
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 

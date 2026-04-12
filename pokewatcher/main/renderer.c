@@ -1,6 +1,7 @@
 #include "renderer.h"
 #include "config.h"
 #include "sprite_loader.h"
+#include "mood_engine.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
@@ -11,7 +12,7 @@
 static const char *TAG = "pw_renderer";
 
 static lv_obj_t *s_screen = NULL;
-static lv_obj_t *s_bg_img = NULL;
+// static lv_obj_t *s_bg_img = NULL;  // reserved for future background image
 static lv_obj_t *s_sprite_img = NULL;
 
 static pw_sprite_data_t s_sprite = {};
