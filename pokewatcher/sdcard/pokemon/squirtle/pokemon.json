@@ -1,0 +1,8 @@
+{
+  "id": "squirtle",
+  "name": "Squirtle",
+  "sprite_sheet": "overworld.png",
+  "frame_manifest": "frames.json",
+  "evolves_to": "wartortle",
+  "evolution_hours": 24
+}

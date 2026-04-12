@@ -1,0 +1,6 @@
+{
+  "id": "wartortle",
+  "name": "Wartortle",
+  "sprite_sheet": "overworld.png",
+  "frame_manifest": "frames.json"
+}

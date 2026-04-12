@@ -1,0 +1,6 @@
+{
+  "id": "raichu",
+  "name": "Raichu",
+  "sprite_sheet": "overworld.png",
+  "frame_manifest": "frames.json"
+}

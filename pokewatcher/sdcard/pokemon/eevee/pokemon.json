@@ -1,0 +1,6 @@
+{
+  "id": "eevee",
+  "name": "Eevee",
+  "sprite_sheet": "overworld.png",
+  "frame_manifest": "frames.json"
+}

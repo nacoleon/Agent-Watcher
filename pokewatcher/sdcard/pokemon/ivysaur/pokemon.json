@@ -1,0 +1,6 @@
+{
+  "id": "ivysaur",
+  "name": "Ivysaur",
+  "sprite_sheet": "overworld.png",
+  "frame_manifest": "frames.json"
+}
