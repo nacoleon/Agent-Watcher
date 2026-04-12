@@ -2,6 +2,7 @@
 #include "config.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -16,6 +17,38 @@ static pw_evolution_cb_t s_evolution_cb = NULL;
 static int64_t now_ms(void)
 {
     return esp_timer_get_time() / 1000;
+}
+
+static void save_mood_config(void)
+{
+    nvs_handle_t handle;
+    if (nvs_open(PW_NVS_NAMESPACE, NVS_READWRITE, &handle) == ESP_OK) {
+        nvs_set_blob(handle, "mood_cfg", &s_config, sizeof(pw_mood_config_t));
+        nvs_commit(handle);
+        nvs_close(handle);
+    }
+}
+
+static void load_mood_config(void)
+{
+    nvs_handle_t handle;
+    if (nvs_open(PW_NVS_NAMESPACE, NVS_READONLY, &handle) == ESP_OK) {
+        size_t len = sizeof(pw_mood_config_t);
+        esp_err_t err = nvs_get_blob(handle, "mood_cfg", &s_config, &len);
+        nvs_close(handle);
+        if (err == ESP_OK && len == sizeof(pw_mood_config_t)) {
+            ESP_LOGI(TAG, "Mood config loaded from NVS");
+            return;
+        }
+    }
+    // Defaults
+    s_config = (pw_mood_config_t){
+        .excited_duration_ms = PW_EXCITED_DURATION_MS,
+        .overjoyed_duration_ms = PW_OVERJOYED_DURATION_MS,
+        .curious_timeout_ms = PW_CURIOUS_TIMEOUT_MS,
+        .lonely_timeout_ms = PW_LONELY_TIMEOUT_MS,
+        .evolution_threshold_hours = PW_DEFAULT_EVOLUTION_HOURS,
+    };
 }
 
 static void set_mood(pw_mood_t new_mood)
@@ -43,13 +76,7 @@ void pw_mood_engine_init(void)
         .evolution_last_tick_ms = now,
     };
 
-    s_config = (pw_mood_config_t){
-        .excited_duration_ms = PW_EXCITED_DURATION_MS,
-        .overjoyed_duration_ms = PW_OVERJOYED_DURATION_MS,
-        .curious_timeout_ms = PW_CURIOUS_TIMEOUT_MS,
-        .lonely_timeout_ms = PW_LONELY_TIMEOUT_MS,
-        .evolution_threshold_hours = PW_DEFAULT_EVOLUTION_HOURS,
-    };
+    load_mood_config();
 
     ESP_LOGI(TAG, "Mood engine initialized (starting in SLEEPY)");
 }
@@ -159,7 +186,8 @@ pw_mood_config_t pw_mood_engine_get_config(void)
 void pw_mood_engine_set_config(const pw_mood_config_t *config)
 {
     s_config = *config;
-    ESP_LOGI(TAG, "Config updated: excited=%lums, curious=%lums, lonely=%lums",
+    save_mood_config();
+    ESP_LOGI(TAG, "Config updated and saved: excited=%lums, curious=%lums, lonely=%lums",
              (unsigned long)s_config.excited_duration_ms,
              (unsigned long)s_config.curious_timeout_ms,
              (unsigned long)s_config.lonely_timeout_ms);
