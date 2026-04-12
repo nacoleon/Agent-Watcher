@@ -1,1 +1,12 @@
 .superpowers/
+
+# ESP-IDF build artifacts
+pokewatcher/build/
+pokewatcher/.cache/
+pokewatcher/managed_components/
+pokewatcher/dependencies.lock
+pokewatcher/sdkconfig
+pokewatcher/sdkconfig.old
+
+# Vendored SDK (cloned separately)
+SenseCAP-Watcher-Firmware/
