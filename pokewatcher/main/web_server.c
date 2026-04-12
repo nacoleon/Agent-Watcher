@@ -13,6 +13,17 @@
 static const char *TAG = "pw_web";
 static httpd_handle_t s_server = NULL;
 
+static bool is_valid_pokemon_id(const char *id)
+{
+    if (!id || id[0] == '\0') return false;
+    for (const char *p = id; *p; p++) {
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '_' || *p == '-')) {
+            return false;
+        }
+    }
+    return true;
+}
+
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
 extern const uint8_t roster_html_start[] asm("_binary_roster_html_start");
@@ -128,9 +139,9 @@ static esp_err_t handle_api_roster_add(httpd_req_t *req)
     }
 
     cJSON *id = cJSON_GetObjectItem(root, "id");
-    if (!id || !cJSON_IsString(id)) {
+    if (!id || !cJSON_IsString(id) || !is_valid_pokemon_id(id->valuestring)) {
         cJSON_Delete(root);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing 'id'");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid 'id'");
         return ESP_FAIL;
     }
 
@@ -155,6 +166,11 @@ static esp_err_t handle_api_roster_delete(httpd_req_t *req)
     }
     id++;
 
+    if (!is_valid_pokemon_id(id)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid ID");
+        return ESP_FAIL;
+    }
+
     bool ok = pw_roster_remove(id);
     if (ok) {
         httpd_resp_sendstr(req, "{\"ok\":true}");
@@ -175,22 +191,28 @@ static esp_err_t handle_api_roster_active(httpd_req_t *req)
     buf[ret] = '\0';
 
     cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
     cJSON *id = cJSON_GetObjectItem(root, "id");
-    if (!id || !cJSON_IsString(id)) {
+    if (!id || !cJSON_IsString(id) || !is_valid_pokemon_id(id->valuestring)) {
         cJSON_Delete(root);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing 'id'");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid 'id'");
         return ESP_FAIL;
     }
 
     bool ok = pw_roster_set_active(id->valuestring);
-    cJSON_Delete(root);
 
     if (ok) {
         pw_event_t evt = { .type = PW_EVENT_ROSTER_CHANGE };
         strncpy(evt.data.roster.pokemon_id, id->valuestring, sizeof(evt.data.roster.pokemon_id) - 1);
+        cJSON_Delete(root);
         pw_event_send(&evt);
         httpd_resp_sendstr(req, "{\"ok\":true}");
     } else {
+        cJSON_Delete(root);
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to set active");
     }
     return ESP_OK;
