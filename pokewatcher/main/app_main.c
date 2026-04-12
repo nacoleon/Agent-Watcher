@@ -6,9 +6,7 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "nvs_flash.h"
-#include "driver/sdmmc_host.h"
-#include "esp_vfs_fat.h"
-#include "sdmmc_cmd.h"
+#include "sensecap-watcher.h"
 
 #include "config.h"
 #include "event_queue.h"
@@ -74,26 +72,12 @@ static void init_wifi(void)
 
 static void init_sdcard(void)
 {
-    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-    host.max_freq_khz = SDMMC_FREQ_DEFAULT;
-
-    sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
-    slot_config.width = 1;
-
-    esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = false,
-        .max_files = 5,
-        .allocation_unit_size = 16 * 1024,
-    };
-
-    sdmmc_card_t *card;
-    esp_err_t ret = esp_vfs_fat_sdmmc_mount(PW_SD_MOUNT_POINT, &host, &slot_config, &mount_config, &card);
+    esp_err_t ret = bsp_sdcard_init_default();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to mount SD card: %s", esp_err_to_name(ret));
         ESP_LOGW(TAG, "Continuing without SD card — sprites won't load");
     } else {
-        ESP_LOGI(TAG, "SD card mounted at %s", PW_SD_MOUNT_POINT);
-        sdmmc_card_print_info(stdout, card);
+        ESP_LOGI(TAG, "SD card mounted");
     }
 }
 
