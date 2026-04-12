@@ -40,8 +40,14 @@ static void load_config(void)
     nvs_handle_t handle;
     if (nvs_open(PW_NVS_NAMESPACE, NVS_READONLY, &handle) == ESP_OK) {
         size_t len = sizeof(pw_llm_config_t);
-        nvs_get_blob(handle, "llm_cfg", &s_config, &len);
+        esp_err_t err = nvs_get_blob(handle, "llm_cfg", &s_config, &len);
         nvs_close(handle);
+        if (err != ESP_OK || len != sizeof(pw_llm_config_t)) {
+            if (err == ESP_OK) {
+                ESP_LOGW(TAG, "LLM config blob size mismatch, resetting");
+            }
+            memset(&s_config, 0, sizeof(pw_llm_config_t));
+        }
     }
 }
 

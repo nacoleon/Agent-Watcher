@@ -38,8 +38,12 @@ static void roster_load(void)
     size_t len = sizeof(pw_roster_t);
     err = nvs_get_blob(handle, "roster", &s_roster, &len);
     nvs_close(handle);
-    if (err != ESP_OK) {
-        ESP_LOGI(TAG, "No saved roster found, starting fresh");
+    if (err != ESP_OK || len != sizeof(pw_roster_t)) {
+        if (err == ESP_OK) {
+            ESP_LOGW(TAG, "Roster blob size mismatch (%zu vs %zu), resetting", len, sizeof(pw_roster_t));
+        } else {
+            ESP_LOGI(TAG, "No saved roster found, starting fresh");
+        }
         memset(&s_roster, 0, sizeof(pw_roster_t));
     } else {
         ESP_LOGI(TAG, "Roster loaded (count=%d, active=%s)", s_roster.count, s_roster.active_id);
