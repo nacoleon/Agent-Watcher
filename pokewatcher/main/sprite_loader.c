@@ -12,7 +12,7 @@ static const char *TAG = "pw_sprite";
 static bool load_frame_manifest(const char *pokemon_id, pw_sprite_data_t *sprite)
 {
     char path[300];
-    snprintf(path, sizeof(path), "%s/%s/frames.json", PW_SD_POKEMON_DIR, pokemon_id);
+    snprintf(path, sizeof(path), "%s/%s/frames.json", PW_SD_CHARACTER_DIR, pokemon_id);
 
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -74,15 +74,17 @@ static bool load_frame_manifest(const char *pokemon_id, pw_sprite_data_t *sprite
         sprite->animation_count++;
     }
 
-    cJSON *mood_map = cJSON_GetObjectItem(root, "mood_animations");
-    if (mood_map) {
-        const char *mood_keys[] = {"excited", "happy", "curious", "lonely", "sleepy", "overjoyed"};
-        for (int i = 0; i < 6; i++) {
-            cJSON *val = cJSON_GetObjectItem(mood_map, mood_keys[i]);
-            if (val && cJSON_IsString(val)) {
-                strncpy(sprite->mood_anim_names[i], val->valuestring, PW_ANIM_NAME_LEN - 1);
-            }
-        }
+    static const char *state_anim_map[] = {
+        [PW_STATE_IDLE]      = "idle_down",
+        [PW_STATE_WORKING]   = "walk_down",
+        [PW_STATE_WAITING]   = "idle_down",
+        [PW_STATE_ALERT]     = "walk_down",
+        [PW_STATE_GREETING]  = "greeting",
+        [PW_STATE_SLEEPING]  = "sleeping",
+        [PW_STATE_REPORTING] = "idle_down",
+    };
+    for (int i = 0; i < PW_STATE_COUNT; i++) {
+        strncpy(sprite->state_anim_names[i], state_anim_map[i], PW_ANIM_NAME_LEN - 1);
     }
 
     cJSON_Delete(root);
@@ -94,7 +96,7 @@ static bool load_frame_manifest(const char *pokemon_id, pw_sprite_data_t *sprite
 static bool load_sprite_sheet(const char *pokemon_id, pw_sprite_data_t *sprite)
 {
     char path[300];
-    snprintf(path, sizeof(path), "%s/%s/overworld.raw", PW_SD_POKEMON_DIR, pokemon_id);
+    snprintf(path, sizeof(path), "%s/%s/overworld.raw", PW_SD_CHARACTER_DIR, pokemon_id);
 
     FILE *f = fopen(path, "rb");
     if (!f) {
@@ -145,10 +147,10 @@ void pw_sprite_free(pw_sprite_data_t *sprite)
     }
 }
 
-const pw_animation_t *pw_sprite_get_mood_anim(const pw_sprite_data_t *sprite, pw_mood_t mood)
+const pw_animation_t *pw_sprite_get_state_anim(const pw_sprite_data_t *sprite, pw_agent_state_t state)
 {
-    if (mood >= 6) return NULL;
-    const char *anim_name = sprite->mood_anim_names[mood];
+    if (state >= PW_STATE_COUNT) return NULL;
+    const char *anim_name = sprite->state_anim_names[state];
     if (anim_name[0] == '\0') return NULL;
 
     for (int i = 0; i < sprite->animation_count; i++) {

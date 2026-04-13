@@ -26,7 +26,7 @@ typedef struct {
     uint16_t frame_height;
     pw_animation_t animations[PW_MAX_ANIMATIONS];
     int animation_count;
-    char mood_anim_names[6][PW_ANIM_NAME_LEN];
+    char state_anim_names[PW_STATE_COUNT][PW_ANIM_NAME_LEN];
     uint8_t *sprite_sheet_data;
     uint32_t sheet_width;
     uint32_t sheet_height;
@@ -34,7 +34,7 @@ typedef struct {
 
 bool pw_sprite_load(const char *pokemon_id, pw_sprite_data_t *sprite);
 void pw_sprite_free(pw_sprite_data_t *sprite);
-const pw_animation_t *pw_sprite_get_mood_anim(const pw_sprite_data_t *sprite, pw_mood_t mood);
+const pw_animation_t *pw_sprite_get_state_anim(const pw_sprite_data_t *sprite, pw_agent_state_t state);
 const pw_animation_t *pw_sprite_get_anim_by_name(const pw_sprite_data_t *sprite, const char *name);
 uint8_t *pw_sprite_extract_frame_scaled(const pw_sprite_data_t *sprite, const pw_frame_coord_t *coord, uint16_t scale);
 
