@@ -328,20 +328,21 @@
                 ctx.quadraticCurveTo(boxX, boxY, boxX + r, boxY);
                 ctx.closePath();
 
-                // Base dark gray fill
-                ctx.fillStyle = '#2a2a32';
+                // Light gray base fill
+                ctx.fillStyle = '#707880';
                 ctx.fill();
 
-                // Grainy noise texture overlay
-                const imgData = ctx.getImageData(boxX, boxY, boxW, boxH);
-                const pixels = imgData.data;
-                for (let i = 0; i < pixels.length; i += 4) {
-                    const noise = (Math.random() - 0.5) * 25;
-                    pixels[i]     = Math.min(255, Math.max(0, pixels[i] + noise));
-                    pixels[i + 1] = Math.min(255, Math.max(0, pixels[i + 1] + noise));
-                    pixels[i + 2] = Math.min(255, Math.max(0, pixels[i + 2] + noise));
+                // Static sand-like black dots (seeded from position so they don't move)
+                ctx.fillStyle = 'rgba(0,0,0,0.15)';
+                for (let dy = 0; dy < boxH; dy += 2) {
+                    for (let dx = 0; dx < boxW; dx += 2) {
+                        // Pseudo-random from position (deterministic = no flicker)
+                        const seed = (dx * 7 + dy * 13 + dx * dy) & 0xFF;
+                        if (seed < 40) {
+                            ctx.fillRect(boxX + dx, boxY + dy, 1, 1);
+                        }
+                    }
                 }
-                ctx.putImageData(imgData, boxX, boxY);
 
                 // Redraw rounded rect border on top of noise
                 ctx.beginPath();
