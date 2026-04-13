@@ -63,30 +63,28 @@ static const uint8_t STATE_BGS[][BG_PER_STATE] = {
 
 static bool load_background_tile(int bg_idx)
 {
-    if (!s_bg_available || s_bg_path[0] == '\0') return false;
+    if (!s_bg_available) return false;
 
-    FILE *f = fopen(s_bg_path, "rb");
+    // Load individual tile file: /sdcard/characters/zidane/bg/XX.raw
+    char path[300];
+    snprintf(path, sizeof(path), "%s/zidane/bg/%02d.raw", PW_SD_CHARACTER_DIR, bg_idx);
+
+    FILE *f = fopen(path, "rb");
     if (!f) {
-        ESP_LOGE(TAG, "Cannot open backgrounds file");
+        ESP_LOGE(TAG, "Cannot open bg tile: %s", path);
         return false;
     }
 
-    int col = bg_idx % PW_BG_SHEET_COLS;
-    int row = bg_idx / PW_BG_SHEET_COLS;
-    int tile_x = PW_BG_SEPARATOR + col * (PW_BG_CELL_W + PW_BG_SEPARATOR);
-    int tile_y = PW_BG_SEPARATOR + row * (PW_BG_CELL_H + PW_BG_SEPARATOR);
+    // Read header (4 bytes: width, height)
+    uint16_t dims[2];
+    fread(dims, 2, 2, f);
+    uint16_t tw = dims[0], th = dims[1];
 
-    // Allocate tile buffer (240*170*2 = 81600 bytes) — read raw tile first
-    size_t tile_size = PW_BG_CELL_W * PW_BG_CELL_H * 2;
+    // Read entire tile in one sequential read (~80KB)
+    size_t tile_size = tw * th * 2;
     uint16_t *tile_buf = heap_caps_malloc(tile_size, MALLOC_CAP_SPIRAM);
     if (!tile_buf) { fclose(f); ESP_LOGE(TAG, "tile alloc failed"); return false; }
-
-    // Read tile rows sequentially (one seek per row, but only 170 rows)
-    for (int ty = 0; ty < PW_BG_CELL_H; ty++) {
-        long offset = 4 + ((tile_y + ty) * PW_BG_SHEET_W + tile_x) * 2;
-        fseek(f, offset, SEEK_SET);
-        fread(&tile_buf[ty * PW_BG_CELL_W], 2, PW_BG_CELL_W, f);
-    }
+    fread(tile_buf, 2, tw * th, f);
     fclose(f);
 
     // Allocate display buffer (412*412*2 = 339488 bytes)
@@ -100,13 +98,13 @@ static bool load_background_tile(int bg_idx)
         }
     }
 
-    // Scale tile (240x170) to display (412x412) via nearest-neighbor
+    // Scale tile to display via nearest-neighbor
     uint16_t *dst = (uint16_t *)s_bg_buf;
     for (int dy = 0; dy < PW_DISPLAY_HEIGHT; dy++) {
-        int sy = dy * PW_BG_CELL_H / PW_DISPLAY_HEIGHT;
+        int sy = dy * th / PW_DISPLAY_HEIGHT;
         for (int dx = 0; dx < PW_DISPLAY_WIDTH; dx++) {
-            int sx = dx * PW_BG_CELL_W / PW_DISPLAY_WIDTH;
-            dst[dy * PW_DISPLAY_WIDTH + dx] = tile_buf[sy * PW_BG_CELL_W + sx];
+            int sx = dx * tw / PW_DISPLAY_WIDTH;
+            dst[dy * PW_DISPLAY_WIDTH + dx] = tile_buf[sy * tw + sx];
         }
     }
     heap_caps_free(tile_buf);
@@ -469,17 +467,17 @@ bool pw_renderer_load_character(const char *character_id)
     s_state_timer = 0;
     update_frame();
 
-    // Check for backgrounds file
-    snprintf(s_bg_path, sizeof(s_bg_path), "%s/%s/backgrounds.raw", PW_SD_CHARACTER_DIR, character_id);
-    FILE *bf = fopen(s_bg_path, "rb");
+    // Check for background tiles directory (try loading tile 01 as a test)
+    char bg_test[300];
+    snprintf(bg_test, sizeof(bg_test), "%s/%s/bg/01.raw", PW_SD_CHARACTER_DIR, character_id);
+    FILE *bf = fopen(bg_test, "rb");
     if (bf) {
         fclose(bf);
         s_bg_available = true;
-        ESP_LOGI(TAG, "Background sheet found: %s", s_bg_path);
+        ESP_LOGI(TAG, "Background tiles found at %s/%s/bg/", PW_SD_CHARACTER_DIR, character_id);
     } else {
         s_bg_available = false;
-        s_bg_path[0] = '\0';
-        ESP_LOGW(TAG, "No background sheet found, using solid colors");
+        ESP_LOGW(TAG, "No background tiles found, using solid colors");
     }
 
     xSemaphoreGive(s_render_mutex);
