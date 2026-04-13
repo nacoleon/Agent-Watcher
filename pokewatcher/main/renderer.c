@@ -66,40 +66,50 @@ static bool load_background_tile(int bg_idx)
     if (!s_bg_available || s_bg_path[0] == '\0') return false;
 
     FILE *f = fopen(s_bg_path, "rb");
-    if (!f) return false;
+    if (!f) {
+        ESP_LOGE(TAG, "Cannot open backgrounds file");
+        return false;
+    }
 
-    // Calculate position in the raw file
-    // Raw file has 4-byte header (width, height) then pixel data row by row
     int col = bg_idx % PW_BG_SHEET_COLS;
     int row = bg_idx / PW_BG_SHEET_COLS;
     int tile_x = PW_BG_SEPARATOR + col * (PW_BG_CELL_W + PW_BG_SEPARATOR);
     int tile_y = PW_BG_SEPARATOR + row * (PW_BG_CELL_H + PW_BG_SEPARATOR);
 
-    // Allocate scaled buffer (412x412 RGB565 = 339488 bytes)
+    // Allocate tile buffer (240*170*2 = 81600 bytes) — read raw tile first
+    size_t tile_size = PW_BG_CELL_W * PW_BG_CELL_H * 2;
+    uint16_t *tile_buf = heap_caps_malloc(tile_size, MALLOC_CAP_SPIRAM);
+    if (!tile_buf) { fclose(f); ESP_LOGE(TAG, "tile alloc failed"); return false; }
+
+    // Read tile rows sequentially (one seek per row, but only 170 rows)
+    for (int ty = 0; ty < PW_BG_CELL_H; ty++) {
+        long offset = 4 + ((tile_y + ty) * PW_BG_SHEET_W + tile_x) * 2;
+        fseek(f, offset, SEEK_SET);
+        fread(&tile_buf[ty * PW_BG_CELL_W], 2, PW_BG_CELL_W, f);
+    }
+    fclose(f);
+
+    // Allocate display buffer (412*412*2 = 339488 bytes)
     size_t dst_size = PW_DISPLAY_WIDTH * PW_DISPLAY_HEIGHT * 2;
     if (!s_bg_buf) {
         s_bg_buf = heap_caps_malloc(dst_size, MALLOC_CAP_SPIRAM);
-        if (!s_bg_buf) { fclose(f); return false; }
-    }
-
-    // Read tile row by row and scale to display size
-    uint16_t *dst = (uint16_t *)s_bg_buf;
-    uint16_t row_buf[PW_BG_CELL_W];
-
-    for (int dy = 0; dy < PW_DISPLAY_HEIGHT; dy++) {
-        // Map display row to source row
-        int sy = tile_y + (dy * PW_BG_CELL_H / PW_DISPLAY_HEIGHT);
-        // Seek to the start of this row in the raw file (skip 4-byte header)
-        long offset = 4 + (sy * PW_BG_SHEET_W + tile_x) * 2;
-        fseek(f, offset, SEEK_SET);
-        fread(row_buf, 2, PW_BG_CELL_W, f);
-
-        for (int dx = 0; dx < PW_DISPLAY_WIDTH; dx++) {
-            int sx = dx * PW_BG_CELL_W / PW_DISPLAY_WIDTH;
-            dst[dy * PW_DISPLAY_WIDTH + dx] = row_buf[sx];
+        if (!s_bg_buf) {
+            heap_caps_free(tile_buf);
+            ESP_LOGE(TAG, "bg display alloc failed");
+            return false;
         }
     }
-    fclose(f);
+
+    // Scale tile (240x170) to display (412x412) via nearest-neighbor
+    uint16_t *dst = (uint16_t *)s_bg_buf;
+    for (int dy = 0; dy < PW_DISPLAY_HEIGHT; dy++) {
+        int sy = dy * PW_BG_CELL_H / PW_DISPLAY_HEIGHT;
+        for (int dx = 0; dx < PW_DISPLAY_WIDTH; dx++) {
+            int sx = dx * PW_BG_CELL_W / PW_DISPLAY_WIDTH;
+            dst[dy * PW_DISPLAY_WIDTH + dx] = tile_buf[sy * PW_BG_CELL_W + sx];
+        }
+    }
+    heap_caps_free(tile_buf);
 
     // Set up LVGL image descriptor
     s_bg_dsc.header.cf = LV_IMG_CF_TRUE_COLOR;
