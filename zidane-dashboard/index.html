@@ -288,67 +288,6 @@
                 }
             }
 
-            // Speech cloud bubble for alert — red tint
-            if (currentState === 'alert') {
-                const bobY = Math.sin(frameTick * 0.15) * 3;
-                const bx = drawX + drawW + 10, by = drawY - 20 + bobY;
-
-                // Cloud shape
-                ctx.fillStyle = '#FFDDDD';
-                ctx.beginPath();
-                ctx.arc(bx, by, 14, 0, Math.PI * 2);
-                ctx.arc(bx - 10, by + 4, 10, 0, Math.PI * 2);
-                ctx.arc(bx + 10, by + 4, 10, 0, Math.PI * 2);
-                ctx.arc(bx - 5, by - 6, 9, 0, Math.PI * 2);
-                ctx.arc(bx + 7, by - 6, 9, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Tail
-                ctx.beginPath();
-                ctx.arc(bx - 8, by + 16, 4, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.beginPath();
-                ctx.arc(bx - 12, by + 22, 2.5, 0, Math.PI * 2);
-                ctx.fill();
-
-                // "!!" text
-                ctx.font = 'bold 18px monospace';
-                ctx.fillStyle = '#CC0000';
-                ctx.textAlign = 'center';
-                ctx.fillText('!!', bx, by + 5);
-                ctx.textAlign = 'left';
-            }
-
-            // Speech cloud bubble for greeting
-            if (currentState === 'greeting') {
-                const bobY = Math.sin(frameTick * 0.12) * 3;
-                const bx = drawX + drawW + 10, by = drawY - 20 + bobY;
-
-                // Cloud shape — overlapping circles
-                ctx.fillStyle = '#FFFFFF';
-                ctx.beginPath();
-                ctx.arc(bx, by, 14, 0, Math.PI * 2);
-                ctx.arc(bx - 10, by + 4, 10, 0, Math.PI * 2);
-                ctx.arc(bx + 10, by + 4, 10, 0, Math.PI * 2);
-                ctx.arc(bx - 5, by - 6, 9, 0, Math.PI * 2);
-                ctx.arc(bx + 7, by - 6, 9, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Tail — small circles pointing down toward Zidane
-                ctx.beginPath();
-                ctx.arc(bx - 8, by + 16, 4, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.beginPath();
-                ctx.arc(bx - 12, by + 22, 2.5, 0, Math.PI * 2);
-                ctx.fill();
-
-                // "Hi!" text
-                ctx.font = 'bold 14px monospace';
-                ctx.fillStyle = '#FF6600';
-                ctx.textAlign = 'center';
-                ctx.fillText('Hi!', bx, by + 5);
-                ctx.textAlign = 'left';
-            }
 
             // --- FF9 Dialog Box (for alert, greeting, reporting) ---
             if (hasDialog) {
