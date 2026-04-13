@@ -413,11 +413,8 @@ void pw_renderer_init(void)
     lv_obj_set_style_radius(s_screen, PW_DISPLAY_WIDTH / 2, 0);
     lv_obj_set_style_clip_corner(s_screen, true, 0);
 
-    // Background image (behind sprite, full screen)
-    s_bg_img = lv_img_create(s_screen);
-    lv_obj_remove_style_all(s_bg_img);
-    lv_obj_set_pos(s_bg_img, 0, 0);
-    lv_obj_add_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);  // hidden until loaded
+    // s_bg_img created on-demand when a background tile is loaded
+    // Don't create it here — empty lv_img renders as white covering bg color
 
     s_sprite_img = lv_img_create(s_screen);
     lv_obj_remove_style_all(s_sprite_img);  // Strip default theme bg/border
