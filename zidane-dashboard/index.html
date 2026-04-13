@@ -86,7 +86,7 @@
             working:   { walkChance: 0.05, turnChance: 0.03, walkSteps: [8,16],  speed: 1.5, bounceAmp: 0, pauseTicks: [20,50],  bgColor: '#E8F0E8' },
             waiting:   { walkChance: 0.005,turnChance: 0.015,walkSteps: [2,5],   speed: 0.8, bounceAmp: 0, pauseTicks: [80,200], bgColor: '#E8E0F0' },
             alert:     { walkChance: 0.08, turnChance: 0.05, walkSteps: [10,25], speed: 3.0, bounceAmp: 4, pauseTicks: [5,15],   bgColor: '#402020' },
-            greeting:  { walkChance: 0.06, turnChance: 0.04, walkSteps: [8,20],  speed: 2.5, bounceAmp: 3, pauseTicks: [10,30],  bgColor: '#FFF0C0' },
+            greeting:  { walkChance: 0, turnChance: 0, walkSteps: [0,0],  speed: 0, bounceAmp: 0, pauseTicks: [100,200],  bgColor: '#FFF0C0' },
             sleeping:  { walkChance: 0.003,turnChance: 0.005,walkSteps: [2,5],   speed: 0.5, bounceAmp: 0, pauseTicks: [100,250],bgColor: '#404060' },
             reporting: { walkChance: 0.01, turnChance: 0.01, walkSteps: [3,6],   speed: 1.0, bounceAmp: 0, pauseTicks: [50,100], bgColor: '#FDE8C8' },
         };
@@ -140,6 +140,7 @@
             alert: 'alert',
             reporting: 'reporting',
             waiting: 'waiting',
+            greeting: 'greeting',
         };
 
         function behaviorTick() {
@@ -154,15 +155,10 @@
 
             switch (state) {
             case 'idle':
-                // Greeting uses its own anim but still moves
-                if (currentState === 'greeting') {
-                    setAnim('greeting');
-                } else {
-                    setAnim('idle_' + facing);
-                }
+                setAnim('idle_' + facing);
                 if (Math.random() < b.turnChance) {
                     facing = DIRS[Math.floor(Math.random() * 4)];
-                    if (currentState !== 'greeting') setAnim('idle_' + facing);
+                    setAnim('idle_' + facing);
                     state = 'pausing'; stateTimer = 0;
                 } else if (Math.random() < b.walkChance) {
                     pickWalkDir();
@@ -172,26 +168,18 @@
                 }
                 break;
             case 'walking':
-                if (currentState === 'greeting') {
-                    setAnim('greeting');
-                } else {
-                    setAnim('walk_' + facing);
-                }
+                setAnim('walk_' + facing);
                 posX += walkDir.x * b.speed;
                 posY += walkDir.y * b.speed;
                 clampPos();
                 walkStepsLeft--;
                 if (walkStepsLeft <= 0 || atBoundary()) {
                     state = 'pausing'; stateTimer = 0;
-                    if (currentState !== 'greeting') setAnim('idle_' + facing);
+                    setAnim('idle_' + facing);
                 }
                 break;
             case 'pausing':
-                if (currentState === 'greeting') {
-                    setAnim('greeting');
-                } else {
-                    setAnim('idle_' + facing);
-                }
+                setAnim('idle_' + facing);
                 const [pMin, pMax] = b.pauseTicks;
                 if (stateTimer > pMin + Math.random() * (pMax - pMin)) {
                     state = 'idle'; stateTimer = 0;
@@ -250,43 +238,65 @@
                 }
             }
 
-            // "!" bubble for alert — red exclamation
+            // Speech cloud bubble for alert — red tint
             if (currentState === 'alert') {
                 const bobY = Math.sin(frameTick * 0.15) * 3;
-                const bx = posX + 30, by = posY - 65 + bobY;
-                // Bubble background
-                ctx.fillStyle = '#AA5555';
+                const bx = posX + 40, by = posY - 70 + bobY;
+
+                // Cloud shape
+                ctx.fillStyle = '#FFDDDD';
                 ctx.beginPath();
                 ctx.arc(bx, by, 14, 0, Math.PI * 2);
+                ctx.arc(bx - 10, by + 4, 10, 0, Math.PI * 2);
+                ctx.arc(bx + 10, by + 4, 10, 0, Math.PI * 2);
+                ctx.arc(bx - 5, by - 6, 9, 0, Math.PI * 2);
+                ctx.arc(bx + 7, by - 6, 9, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.strokeStyle = '#FF8888';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-                // Exclamation mark
+
+                // Tail
+                ctx.beginPath();
+                ctx.arc(bx - 8, by + 16, 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(bx - 12, by + 22, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                // "!!" text
                 ctx.font = 'bold 18px monospace';
-                ctx.fillStyle = '#FFF';
+                ctx.fillStyle = '#CC0000';
                 ctx.textAlign = 'center';
-                ctx.fillText('!', bx, by + 6);
+                ctx.fillText('!!', bx, by + 5);
                 ctx.textAlign = 'left';
             }
 
-            // "!" bubble for greeting — yellow/friendly
+            // Speech cloud bubble for greeting
             if (currentState === 'greeting') {
-                const bobY = Math.sin(frameTick * 0.2) * 4;
-                const bx = posX + 30, by = posY - 65 + bobY;
-                // Bubble background
-                ctx.fillStyle = '#FFD700';
+                const bobY = Math.sin(frameTick * 0.12) * 3;
+                const bx = posX + 40, by = posY - 70 + bobY;
+
+                // Cloud shape — overlapping circles
+                ctx.fillStyle = '#FFFFFF';
                 ctx.beginPath();
                 ctx.arc(bx, by, 14, 0, Math.PI * 2);
+                ctx.arc(bx - 10, by + 4, 10, 0, Math.PI * 2);
+                ctx.arc(bx + 10, by + 4, 10, 0, Math.PI * 2);
+                ctx.arc(bx - 5, by - 6, 9, 0, Math.PI * 2);
+                ctx.arc(bx + 7, by - 6, 9, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.strokeStyle = '#FFF0C0';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-                // Exclamation mark
+
+                // Tail — small circles pointing down toward Zidane
+                ctx.beginPath();
+                ctx.arc(bx - 8, by + 16, 4, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(bx - 12, by + 22, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                // "!" text
                 ctx.font = 'bold 18px monospace';
-                ctx.fillStyle = '#1a1a2e';
+                ctx.fillStyle = '#FF6600';
                 ctx.textAlign = 'center';
-                ctx.fillText('!', bx, by + 6);
+                ctx.fillText('!', bx, by + 5);
                 ctx.textAlign = 'left';
             }
 
