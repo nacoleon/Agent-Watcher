@@ -216,7 +216,7 @@
             const bounceY = b.bounceAmp > 0 ? Math.sin(frameTick * 0.3) * b.bounceAmp : 0;
 
             // Shift sprite up when dialog is visible
-            const dialogShiftY = hasDialog ? -95 : 0;
+            const dialogShiftY = hasDialog ? 95 : 0;
 
             const drawW = fw * DRAW_SCALE;
             const drawH = fh * DRAW_SCALE;
@@ -246,7 +246,7 @@
             // Speech cloud bubble for alert — red tint
             if (currentState === 'alert') {
                 const bobY = Math.sin(frameTick * 0.15) * 3;
-                const bx = posX + 40, by = posY - 70 + dialogShiftY + bobY;
+                const bx = drawX + drawW + 10, by = drawY - 20 + bobY;
 
                 // Cloud shape
                 ctx.fillStyle = '#FFDDDD';
@@ -277,7 +277,7 @@
             // Speech cloud bubble for greeting
             if (currentState === 'greeting') {
                 const bobY = Math.sin(frameTick * 0.12) * 3;
-                const bx = posX + 40, by = posY - 70 + dialogShiftY + bobY;
+                const bx = drawX + drawW + 10, by = drawY - 20 + bobY;
 
                 // Cloud shape — overlapping circles
                 ctx.fillStyle = '#FFFFFF';
@@ -344,11 +344,11 @@
                 const boxH = nameH + visibleLines.length * lineH + boxPad * 2;
 
                 const boxX = (CANVAS_SIZE - boxW) / 2;
-                const boxY = drawY + drawH + 8;
+                const boxY = drawY - boxH - 8;  // above Zidane's head
 
-                // Clamp: don't let box extend past safe zone (circular display)
-                const maxBoxBottom = CANVAS_SIZE - 45;
-                const clampedBoxY = Math.min(boxY, maxBoxBottom - boxH);
+                // Clamp: don't let box go above safe zone (circular display)
+                const minBoxTop = 45;
+                const clampedBoxY = Math.max(boxY, minBoxTop);
 
                 // Rounded rect helper
                 const r = 6;
