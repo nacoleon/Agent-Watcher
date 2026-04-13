@@ -103,7 +103,7 @@
             // Peaceful greens, fields, meadows, calm nature
             idle:      [2, 5, 10, 11, 15, 27, 42, 50, 70, 71, 75, 25],
             // Interiors, castles, structured spaces, active feel
-            working:   [14, 19, 22, 26, 30, 31, 37, 44, 46, 67, 73, 81],
+            working:   [14, 19, 22, 26, 30, 31, 37, 44, 46, 67, 33, 81],
             // Skies, clouds, ethereal, cool blues, patient
             waiting:   [9, 6, 32, 36, 45, 54, 55, 66, 68, 75, 79, 83],
             // Fire, lava, red/warm, danger, dark dramatic
@@ -251,18 +251,7 @@
                 }
                 const bp = bgPos(currentBgIdx);
                 // Draw background scaled to fill canvas
-                // Fit background preserving aspect ratio, letterbox with dark fill
-                const bgAspect = BG_CELL_W / BG_CELL_H;  // 240/170 = 1.41
-                const canvasAspect = 1;  // square
-                let dw, dh, dx, dy;
-                // Background is wider than tall — fit width, letterbox top/bottom
-                dw = CANVAS_SIZE;
-                dh = CANVAS_SIZE / bgAspect;
-                dx = 0;
-                dy = (CANVAS_SIZE - dh) / 2;
-                ctx.fillStyle = '#0a0a1e';
-                ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-                ctx.drawImage(bgSheetImg, bp.x, bp.y, BG_CELL_W, BG_CELL_H, dx, dy, dw, dh);
+                ctx.drawImage(bgSheetImg, bp.x, bp.y, BG_CELL_W, BG_CELL_H, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
             } else {
                 ctx.fillStyle = b.bgColor;
                 ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
