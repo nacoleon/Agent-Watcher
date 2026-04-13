@@ -1,11 +1,13 @@
 #include "web_server.h"
-#include "roster.h"
-#include "mood_engine.h"
-#include "llm_task.h"
+#include "agent_state.h"
+#include "dialog.h"
 #include "event_queue.h"
+#include "renderer.h"
 #include "config.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
+#include "esp_wifi.h"
+#include "esp_timer.h"
 #include "mdns.h"
 #include "cJSON.h"
 #include <string.h>
@@ -31,23 +33,8 @@ static int recv_full_body(httpd_req_t *req, char *buf, int buf_size)
     return received;
 }
 
-static bool is_valid_pokemon_id(const char *id)
-{
-    if (!id || id[0] == '\0') return false;
-    for (const char *p = id; *p; p++) {
-        if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '_' || *p == '-')) {
-            return false;
-        }
-    }
-    return true;
-}
-
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
-extern const uint8_t roster_html_start[] asm("_binary_roster_html_start");
-extern const uint8_t roster_html_end[]   asm("_binary_roster_html_end");
-extern const uint8_t settings_html_start[] asm("_binary_settings_html_start");
-extern const uint8_t settings_html_end[]   asm("_binary_settings_html_end");
 extern const uint8_t style_css_start[] asm("_binary_style_css_start");
 extern const uint8_t style_css_end[]   asm("_binary_style_css_end");
 extern const uint8_t app_js_start[] asm("_binary_app_js_start");
@@ -61,29 +48,22 @@ static esp_err_t serve_embedded(httpd_req_t *req, const uint8_t *start, const ui
 }
 
 static esp_err_t handle_index(httpd_req_t *req) { return serve_embedded(req, index_html_start, index_html_end, "text/html"); }
-static esp_err_t handle_roster_page(httpd_req_t *req) { return serve_embedded(req, roster_html_start, roster_html_end, "text/html"); }
-static esp_err_t handle_settings_page(httpd_req_t *req) { return serve_embedded(req, settings_html_start, settings_html_end, "text/html"); }
 static esp_err_t handle_css(httpd_req_t *req) { return serve_embedded(req, style_css_start, style_css_end, "text/css"); }
 static esp_err_t handle_js(httpd_req_t *req) { return serve_embedded(req, app_js_start, app_js_end, "application/javascript"); }
 
 static esp_err_t handle_api_status(httpd_req_t *req)
 {
-    pw_mood_state_t mood = pw_mood_engine_get_state();
-    const char *active = pw_roster_get_active_id();
+    pw_agent_state_data_t state = pw_agent_state_get();
 
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "active_pokemon", active ? active : "");
-    cJSON_AddStringToObject(root, "mood", pw_mood_to_string(mood.current_mood));
-    cJSON_AddBoolToObject(root, "person_present", mood.person_present);
-    cJSON_AddNumberToObject(root, "evolution_seconds", mood.evolution_seconds);
-    cJSON_AddStringToObject(root, "last_commentary", pw_llm_get_last_commentary());
+    cJSON_AddStringToObject(root, "agent_state", pw_agent_state_to_string(state.current_state));
+    cJSON_AddBoolToObject(root, "person_present", state.person_present);
+    cJSON_AddStringToObject(root, "last_message", pw_dialog_get_last_text());
+    cJSON_AddNumberToObject(root, "uptime_seconds", (double)(esp_timer_get_time() / 1000000));
 
-    if (active) {
-        pw_pokemon_def_t def;
-        if (pw_pokemon_load_def(active, &def)) {
-            cJSON_AddNumberToObject(root, "evolution_threshold_hours", def.evolution_hours);
-            cJSON_AddStringToObject(root, "evolves_to", def.evolves_to);
-        }
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        cJSON_AddNumberToObject(root, "wifi_rssi", ap_info.rssi);
     }
 
     char *json = cJSON_PrintUnformatted(root);
@@ -94,217 +74,86 @@ static esp_err_t handle_api_status(httpd_req_t *req)
     return ESP_OK;
 }
 
-static esp_err_t handle_api_roster_get(httpd_req_t *req)
+static esp_err_t handle_api_agent_state(httpd_req_t *req)
 {
-    pw_roster_t roster = pw_roster_get();
-
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "active_id", roster.active_id);
-
-    cJSON *entries = cJSON_AddArrayToObject(root, "entries");
-    for (int i = 0; i < roster.count; i++) {
-        cJSON *entry = cJSON_CreateObject();
-        cJSON_AddStringToObject(entry, "id", roster.entries[i].id);
-        cJSON_AddNumberToObject(entry, "evolution_seconds", roster.entries[i].evolution_seconds);
-
-        pw_pokemon_def_t def;
-        if (pw_pokemon_load_def(roster.entries[i].id, &def)) {
-            cJSON_AddStringToObject(entry, "name", def.name);
-            cJSON_AddStringToObject(entry, "evolves_to", def.evolves_to);
-            cJSON_AddNumberToObject(entry, "evolution_hours", def.evolution_hours);
-        }
-        cJSON_AddItemToArray(entries, entry);
+    char body[128];
+    int ret = recv_full_body(req, body, sizeof(body));
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing body");
+        return ESP_FAIL;
     }
 
-    char available[20][PW_POKEMON_ID_LEN];
-    int avail_count = pw_pokemon_scan_available(available, 20);
-    cJSON *avail_arr = cJSON_AddArrayToObject(root, "available");
-    for (int i = 0; i < avail_count; i++) {
-        bool in_roster = false;
-        for (int j = 0; j < roster.count; j++) {
-            if (strcmp(roster.entries[j].id, available[i]) == 0) {
-                in_roster = true;
-                break;
-            }
-        }
-        if (!in_roster) {
-            cJSON_AddItemToArray(avail_arr, cJSON_CreateString(available[i]));
-        }
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
     }
 
-    char *json = cJSON_PrintUnformatted(root);
+    cJSON *state_json = cJSON_GetObjectItem(root, "state");
+    if (!state_json || !cJSON_IsString(state_json)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing 'state' field");
+        return ESP_FAIL;
+    }
+
+    pw_agent_state_t state = pw_agent_state_from_string(state_json->valuestring);
+    pw_agent_state_set(state);
     cJSON_Delete(root);
+
+    pw_renderer_wake_display();
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "ok", true);
+    cJSON_AddStringToObject(resp, "state", pw_agent_state_to_string(state));
+    char *json = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, json);
     free(json);
     return ESP_OK;
 }
 
-static esp_err_t handle_api_roster_add(httpd_req_t *req)
+static esp_err_t handle_api_message(httpd_req_t *req)
 {
-    char buf[128];
-    if (recv_full_body(req, buf, sizeof(buf)) < 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body or too large");
+    char body[256];
+    int ret = recv_full_body(req, body, sizeof(body));
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing body");
         return ESP_FAIL;
     }
 
-    cJSON *root = cJSON_Parse(buf);
+    cJSON *root = cJSON_Parse(body);
     if (!root) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
         return ESP_FAIL;
     }
 
-    cJSON *id = cJSON_GetObjectItem(root, "id");
-    if (!id || !cJSON_IsString(id) || !is_valid_pokemon_id(id->valuestring)) {
+    cJSON *text_json = cJSON_GetObjectItem(root, "text");
+    if (!text_json || !cJSON_IsString(text_json)) {
         cJSON_Delete(root);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid 'id'");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing 'text' field");
         return ESP_FAIL;
     }
 
-    bool ok = pw_roster_add(id->valuestring);
+    pw_msg_level_t level = PW_MSG_LEVEL_INFO;
+    cJSON *level_json = cJSON_GetObjectItem(root, "level");
+    if (level_json && cJSON_IsString(level_json)) {
+        const char *lvl = level_json->valuestring;
+        if (strcmp(lvl, "success") == 0) level = PW_MSG_LEVEL_SUCCESS;
+        else if (strcmp(lvl, "warning") == 0) level = PW_MSG_LEVEL_WARNING;
+        else if (strcmp(lvl, "error") == 0) level = PW_MSG_LEVEL_ERROR;
+    }
+
+    pw_renderer_show_message(text_json->valuestring, level);
+    pw_renderer_wake_display();
     cJSON_Delete(root);
 
-    if (ok) {
-        httpd_resp_sendstr(req, "{\"ok\":true}");
-    } else {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to add");
-    }
-    return ESP_OK;
-}
-
-static esp_err_t handle_api_roster_delete(httpd_req_t *req)
-{
-    const char *uri = req->uri;
-    const char *id = strrchr(uri, '/');
-    if (!id || strlen(id) < 2) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing ID in URI");
-        return ESP_FAIL;
-    }
-    id++;
-
-    if (!is_valid_pokemon_id(id)) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid ID");
-        return ESP_FAIL;
-    }
-
-    bool ok = pw_roster_remove(id);
-    if (ok) {
-        httpd_resp_sendstr(req, "{\"ok\":true}");
-    } else {
-        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Not in roster");
-    }
-    return ESP_OK;
-}
-
-static esp_err_t handle_api_roster_active(httpd_req_t *req)
-{
-    char buf[128];
-    if (recv_full_body(req, buf, sizeof(buf)) < 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body or too large");
-        return ESP_FAIL;
-    }
-
-    cJSON *root = cJSON_Parse(buf);
-    if (!root) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
-        return ESP_FAIL;
-    }
-
-    cJSON *id = cJSON_GetObjectItem(root, "id");
-    if (!id || !cJSON_IsString(id) || !is_valid_pokemon_id(id->valuestring)) {
-        cJSON_Delete(root);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing or invalid 'id'");
-        return ESP_FAIL;
-    }
-
-    bool ok = pw_roster_set_active(id->valuestring);
-
-    if (ok) {
-        pw_event_t evt = { .type = PW_EVENT_ROSTER_CHANGE };
-        strncpy(evt.data.roster.pokemon_id, id->valuestring, sizeof(evt.data.roster.pokemon_id) - 1);
-        cJSON_Delete(root);
-        pw_event_send(&evt);
-        httpd_resp_sendstr(req, "{\"ok\":true}");
-    } else {
-        cJSON_Delete(root);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to set active");
-    }
-    return ESP_OK;
-}
-
-static esp_err_t handle_api_settings_get(httpd_req_t *req)
-{
-    pw_mood_config_t mood_cfg = pw_mood_engine_get_config();
-    pw_llm_config_t llm_cfg = pw_llm_get_config();
-
-    cJSON *root = cJSON_CreateObject();
-    cJSON *mood = cJSON_AddObjectToObject(root, "mood");
-    cJSON_AddNumberToObject(mood, "excited_duration_ms", mood_cfg.excited_duration_ms);
-    cJSON_AddNumberToObject(mood, "overjoyed_duration_ms", mood_cfg.overjoyed_duration_ms);
-    cJSON_AddNumberToObject(mood, "curious_timeout_ms", mood_cfg.curious_timeout_ms);
-    cJSON_AddNumberToObject(mood, "lonely_timeout_ms", mood_cfg.lonely_timeout_ms);
-
-    cJSON *llm = cJSON_AddObjectToObject(root, "llm");
-    cJSON_AddStringToObject(llm, "endpoint", llm_cfg.endpoint);
-    cJSON_AddStringToObject(llm, "model", llm_cfg.model);
-    cJSON_AddBoolToObject(llm, "api_key_set", llm_cfg.api_key[0] != '\0');
-
-    char *json = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "ok", true);
+    char *json = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, json);
-    free(json);
-    return ESP_OK;
-}
-
-static esp_err_t handle_api_settings_put(httpd_req_t *req)
-{
-    char *buf = malloc(1024);
-    if (!buf) return ESP_FAIL;
-    if (recv_full_body(req, buf, 1024) < 0) {
-        free(buf);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body or too large");
-        return ESP_FAIL;
-    }
-
-    cJSON *root = cJSON_Parse(buf);
-    free(buf);
-    if (!root) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
-        return ESP_FAIL;
-    }
-
-    cJSON *mood = cJSON_GetObjectItem(root, "mood");
-    if (mood) {
-        pw_mood_config_t cfg = pw_mood_engine_get_config();
-        cJSON *val;
-        if ((val = cJSON_GetObjectItem(mood, "curious_timeout_ms"))) cfg.curious_timeout_ms = (uint32_t)val->valuedouble;
-        if ((val = cJSON_GetObjectItem(mood, "lonely_timeout_ms"))) cfg.lonely_timeout_ms = (uint32_t)val->valuedouble;
-        if ((val = cJSON_GetObjectItem(mood, "excited_duration_ms"))) cfg.excited_duration_ms = (uint32_t)val->valuedouble;
-        if ((val = cJSON_GetObjectItem(mood, "overjoyed_duration_ms"))) cfg.overjoyed_duration_ms = (uint32_t)val->valuedouble;
-        pw_mood_engine_set_config(&cfg);
-    }
-
-    cJSON *llm = cJSON_GetObjectItem(root, "llm");
-    if (llm) {
-        pw_llm_config_t cfg = pw_llm_get_config();
-        cJSON *val;
-        if ((val = cJSON_GetObjectItem(llm, "endpoint"))) strncpy(cfg.endpoint, val->valuestring, PW_LLM_ENDPOINT_LEN - 1);
-        if ((val = cJSON_GetObjectItem(llm, "api_key"))) strncpy(cfg.api_key, val->valuestring, PW_LLM_API_KEY_LEN - 1);
-        if ((val = cJSON_GetObjectItem(llm, "model"))) strncpy(cfg.model, val->valuestring, PW_LLM_MODEL_LEN - 1);
-        pw_llm_set_config(&cfg);
-    }
-
-    cJSON_Delete(root);
-    httpd_resp_sendstr(req, "{\"ok\":true}");
-    return ESP_OK;
-}
-
-static esp_err_t handle_api_timeline(httpd_req_t *req)
-{
-    char *json = pw_llm_get_history_json();
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, json ? json : "[]");
     free(json);
     return ESP_OK;
 }
@@ -313,23 +162,20 @@ static void register_routes(httpd_handle_t server)
 {
     httpd_uri_t routes[] = {
         { .uri = "/",             .method = HTTP_GET,    .handler = handle_index },
-        { .uri = "/roster",       .method = HTTP_GET,    .handler = handle_roster_page },
-        { .uri = "/settings",     .method = HTTP_GET,    .handler = handle_settings_page },
         { .uri = "/style.css",    .method = HTTP_GET,    .handler = handle_css },
         { .uri = "/app.js",       .method = HTTP_GET,    .handler = handle_js },
-        { .uri = "/api/status",        .method = HTTP_GET,    .handler = handle_api_status },
-        { .uri = "/api/roster",        .method = HTTP_GET,    .handler = handle_api_roster_get },
-        { .uri = "/api/roster",        .method = HTTP_POST,   .handler = handle_api_roster_add },
-        { .uri = "/api/roster/*",      .method = HTTP_DELETE, .handler = handle_api_roster_delete },
-        { .uri = "/api/roster/active", .method = HTTP_PUT,    .handler = handle_api_roster_active },
-        { .uri = "/api/settings",      .method = HTTP_GET,    .handler = handle_api_settings_get },
-        { .uri = "/api/settings",      .method = HTTP_PUT,    .handler = handle_api_settings_put },
-        { .uri = "/api/timeline",      .method = HTTP_GET,    .handler = handle_api_timeline },
+        { .uri = "/api/status",   .method = HTTP_GET,    .handler = handle_api_status },
     };
 
     for (int i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
         httpd_register_uri_handler(server, &routes[i]);
     }
+
+    httpd_uri_t agent_state_uri = { .uri = "/api/agent-state", .method = HTTP_PUT, .handler = handle_api_agent_state };
+    httpd_register_uri_handler(server, &agent_state_uri);
+
+    httpd_uri_t message_uri = { .uri = "/api/message", .method = HTTP_POST, .handler = handle_api_message };
+    httpd_register_uri_handler(server, &message_uri);
 }
 
 static void init_mdns(void)
@@ -339,10 +185,10 @@ static void init_mdns(void)
         ESP_LOGE(TAG, "mDNS init failed: %s", esp_err_to_name(err));
         return;
     }
-    mdns_hostname_set("pokewatcher");
-    mdns_instance_name_set("PokéWatcher Dashboard");
+    mdns_hostname_set("zidane");
+    mdns_instance_name_set("Zidane Watcher");
     mdns_service_add(NULL, "_http", "_tcp", PW_WEB_SERVER_PORT, NULL, 0);
-    ESP_LOGI(TAG, "mDNS: pokewatcher.local");
+    ESP_LOGI(TAG, "mDNS: zidane.local");
 }
 
 void pw_web_server_start(void)
