@@ -28,6 +28,8 @@ static uint8_t *s_bg_buf = NULL;
 static lv_img_dsc_t s_bg_dsc = {};
 static bool s_bg_available = false;
 static char s_bg_path[300] = "";
+static bool s_bg_needs_load = false;
+static int s_bg_pending_idx = -1;
 
 static pw_sprite_data_t s_sprite = {};
 static pw_agent_state_t s_current_state = PW_STATE_IDLE;
@@ -332,12 +334,16 @@ static void update_frame(void)
     s_frame_buf = pw_sprite_extract_frame_scaled(&s_sprite, coord, PW_SPRITE_SCALE);
     if (!s_frame_buf) return;
 
+    // Use actual sprite dimensions, not hardcoded PW_SPRITE_DST_SIZE
+    uint16_t scaled_w = s_sprite.frame_width * PW_SPRITE_SCALE;
+    uint16_t scaled_h = s_sprite.frame_height * PW_SPRITE_SCALE;
+
     s_frame_dsc.header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA;
     s_frame_dsc.header.always_zero = 0;
     s_frame_dsc.header.reserved = 0;
-    s_frame_dsc.header.w = PW_SPRITE_DST_SIZE;
-    s_frame_dsc.header.h = PW_SPRITE_DST_SIZE;
-    s_frame_dsc.data_size = PW_SPRITE_DST_SIZE * PW_SPRITE_DST_SIZE * 3;
+    s_frame_dsc.header.w = scaled_w;
+    s_frame_dsc.header.h = scaled_h;
+    s_frame_dsc.data_size = scaled_w * scaled_h * 3;
     s_frame_dsc.data = (const uint8_t *)s_frame_buf;
 
     // Bounce effect
@@ -347,9 +353,9 @@ static void update_frame(void)
         bounce_y = (int)(sinf(s_frame_tick * 0.3f) * b->bounce_amp);
     }
 
-    // Position sprite on screen
-    int screen_x = s_pos_x10 / 10 - SPRITE_HALF;
-    int screen_y = s_pos_y10 / 10 - SPRITE_HALF + bounce_y;
+    // Position sprite on screen (use actual scaled dimensions)
+    int screen_x = s_pos_x10 / 10 - scaled_w / 2;
+    int screen_y = s_pos_y10 / 10 - scaled_h / 2 + bounce_y;
 
     if (s_sprite_img) {
         lvgl_port_lock(0);
@@ -478,24 +484,16 @@ void pw_renderer_set_state(pw_agent_state_t state)
     display_wake();
     s_current_state = state;
 
-    // Update background — try image first, fallback to solid color
+    // Update background — schedule load for render loop (non-blocking)
     if (s_screen) {
         lvgl_port_lock(0);
-        bool bg_loaded = false;
-        if (s_bg_available && state < PW_STATE_COUNT) {
-            int pick = STATE_BGS[state][simple_rand() % BG_PER_STATE];
-            if (load_background_tile(pick)) {
-                lv_img_cache_invalidate_src(&s_bg_dsc);
-                lv_img_set_src(s_bg_img, &s_bg_dsc);
-                lv_obj_clear_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
-                bg_loaded = true;
-            }
-        }
-        if (!bg_loaded) {
-            lv_obj_add_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
-        }
         lv_obj_set_style_bg_color(s_screen, lv_color_hex(STATE_BG_COLORS[state]), 0);
         lvgl_port_unlock();
+
+        if (s_bg_available && state < PW_STATE_COUNT) {
+            s_bg_pending_idx = STATE_BGS[state][simple_rand() % BG_PER_STATE];
+            s_bg_needs_load = true;
+        }
     }
 
     // Reset to idle behavior
@@ -530,6 +528,22 @@ static void renderer_task(void *arg)
     TickType_t frame_delay = pdMS_TO_TICKS(1000 / PW_ANIM_FPS);
 
     while (1) {
+        // Load background outside mutex (slow SD read, don't block API/display)
+        if (s_bg_needs_load && s_bg_pending_idx >= 0) {
+            s_bg_needs_load = false;
+            if (load_background_tile(s_bg_pending_idx)) {
+                xSemaphoreTake(s_render_mutex, portMAX_DELAY);
+                lvgl_port_lock(0);
+                lv_img_cache_invalidate_src(&s_bg_dsc);
+                lv_img_set_src(s_bg_img, &s_bg_dsc);
+                lv_obj_clear_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
+                lvgl_port_unlock();
+                xSemaphoreGive(s_render_mutex);
+                ESP_LOGI(TAG, "Background loaded: tile %d", s_bg_pending_idx);
+            }
+            s_bg_pending_idx = -1;
+        }
+
         xSemaphoreTake(s_render_mutex, portMAX_DELAY);
 
         // Check display sleep timeout
@@ -553,5 +567,5 @@ static void renderer_task(void *arg)
 
 void pw_renderer_task_start(void)
 {
-    xTaskCreate(renderer_task, "renderer", 8192, NULL, 4, NULL);
+    xTaskCreate(renderer_task, "renderer", 12288, NULL, 4, NULL);
 }
