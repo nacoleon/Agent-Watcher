@@ -216,7 +216,7 @@
             const bounceY = b.bounceAmp > 0 ? Math.sin(frameTick * 0.3) * b.bounceAmp : 0;
 
             // Shift sprite up when dialog is visible
-            const dialogShiftY = hasDialog ? -55 : 0;
+            const dialogShiftY = hasDialog ? -75 : 0;
 
             const drawW = fw * DRAW_SCALE;
             const drawH = fh * DRAW_SCALE;
@@ -336,8 +336,8 @@
                 }
                 if (currentLine) lines.push(currentLine);
 
-                // Max 4 lines so box doesn't overflow the circular display
-                const maxLines = 4;
+                // Max 6 lines so box doesn't overflow the circular display
+                const maxLines = 6;
                 const visibleLines = lines.slice(0, maxLines);
 
                 // Dynamic box height: name + lines + padding
