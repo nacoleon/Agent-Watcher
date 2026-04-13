@@ -47,19 +47,22 @@ static void init_wifi(void)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL));
 
+    // Compile-time defaults — NVS overrides if set via web dashboard or serial
     wifi_config_t wifi_config = {
         .sta = {
-            .ssid = "",
-            .password = "",
+            .ssid = PW_WIFI_SSID_DEFAULT,
+            .password = PW_WIFI_PASSWORD_DEFAULT,
         },
     };
 
+    // Override with NVS values if they exist (set at runtime)
     nvs_handle_t nvs;
     if (nvs_open(PW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
         size_t len = sizeof(wifi_config.sta.ssid);
-        nvs_get_str(nvs, "wifi_ssid", (char *)wifi_config.sta.ssid, &len);
-        len = sizeof(wifi_config.sta.password);
-        nvs_get_str(nvs, "wifi_pass", (char *)wifi_config.sta.password, &len);
+        if (nvs_get_str(nvs, "wifi_ssid", (char *)wifi_config.sta.ssid, &len) == ESP_OK) {
+            len = sizeof(wifi_config.sta.password);
+            nvs_get_str(nvs, "wifi_pass", (char *)wifi_config.sta.password, &len);
+        }
         nvs_close(nvs);
     }
 

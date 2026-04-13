@@ -35,4 +35,8 @@
 // NVS namespace
 #define PW_NVS_NAMESPACE           "pokewatcher"
 
+// WiFi defaults (NVS overrides at runtime via web dashboard)
+#define PW_WIFI_SSID_DEFAULT       "YOUR_WIFI_SSID"
+#define PW_WIFI_PASSWORD_DEFAULT   "YOUR_WIFI_PASSWORD"
+
 #endif
