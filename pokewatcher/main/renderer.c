@@ -488,53 +488,36 @@ bool pw_renderer_load_character(const char *character_id)
     return true;
 }
 
+// Lock-free state change — just set flags, render loop picks them up
+static volatile pw_agent_state_t s_pending_state = PW_STATE_IDLE;
+static volatile bool s_state_changed = false;
+static volatile bool s_wake_requested = false;
+
+// Pending message
+static char s_pending_msg[PW_DIALOG_MAX_TEXT] = "";
+static volatile pw_msg_level_t s_pending_msg_level = PW_MSG_LEVEL_INFO;
+static volatile bool s_msg_pending = false;
+
 void pw_renderer_set_state(pw_agent_state_t state)
 {
-    xSemaphoreTake(s_render_mutex, portMAX_DELAY);
-
-    display_wake();
-    s_current_state = state;
-
-    // Update background — schedule load for render loop (non-blocking)
-    if (s_screen) {
-        lvgl_port_lock(0);
-        // Show solid color while background image loads
-        lv_obj_set_style_bg_opa(s_screen, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(s_screen, lv_color_hex(STATE_BG_COLORS[state]), 0);
-        lv_obj_add_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
-        lvgl_port_unlock();
-
-        // Background loading disabled — causes freeze on 400kHz SD card
-        // TODO: re-enable when SD card speed is increased or backgrounds are cached in PSRAM
-        // if (s_bg_available && state < PW_STATE_COUNT) {
-        //     s_bg_pending_idx = STATE_BGS[state][simple_rand() % BG_PER_STATE];
-        //     s_bg_needs_load = true;
-        // }
-    }
-
-    // Reset to idle behavior
-    s_behav_state = BEHAV_IDLE;
-    s_state_timer = 0;
-    set_anim_by_name("idle", s_facing);
-
-    xSemaphoreGive(s_render_mutex);
-    ESP_LOGI(TAG, "State visual set to: %s", pw_agent_state_to_string(state));
+    s_pending_state = state;
+    s_state_changed = true;
+    s_wake_requested = true;
+    ESP_LOGI(TAG, "State change queued: %s", pw_agent_state_to_string(state));
 }
 
 void pw_renderer_show_message(const char *text, pw_msg_level_t level)
 {
-    xSemaphoreTake(s_render_mutex, portMAX_DELAY);
-    lvgl_port_lock(0);
-    pw_dialog_show(text, level);
-    lvgl_port_unlock();
-    xSemaphoreGive(s_render_mutex);
+    strncpy(s_pending_msg, text, PW_DIALOG_MAX_TEXT - 1);
+    s_pending_msg[PW_DIALOG_MAX_TEXT - 1] = '\0';
+    s_pending_msg_level = level;
+    s_msg_pending = true;
+    s_wake_requested = true;
 }
 
 void pw_renderer_wake_display(void)
 {
-    xSemaphoreTake(s_render_mutex, portMAX_DELAY);
-    display_wake();
-    xSemaphoreGive(s_render_mutex);
+    s_wake_requested = true;
 }
 
 static void renderer_task(void *arg)
@@ -544,25 +527,38 @@ static void renderer_task(void *arg)
     TickType_t frame_delay = pdMS_TO_TICKS(1000 / PW_ANIM_FPS);
 
     while (1) {
-        // Load background outside mutex (slow SD read, don't block API/display)
-        if (s_bg_needs_load && s_bg_pending_idx >= 0) {
-            s_bg_needs_load = false;
-            if (load_background_tile(s_bg_pending_idx)) {
-                xSemaphoreTake(s_render_mutex, portMAX_DELAY);
-                lvgl_port_lock(0);
-                lv_img_cache_invalidate_src(&s_bg_dsc);
-                lv_img_set_src(s_bg_img, &s_bg_dsc);
-                lv_obj_clear_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
-                // Make screen bg transparent so the image shows
-                lv_obj_set_style_bg_opa(s_screen, LV_OPA_TRANSP, 0);
-                lvgl_port_unlock();
-                xSemaphoreGive(s_render_mutex);
-                ESP_LOGI(TAG, "Background loaded: tile %d", s_bg_pending_idx);
-            }
-            s_bg_pending_idx = -1;
+        // --- Process pending state/message/wake (lock-free from other threads) ---
+        if (s_wake_requested) {
+            s_wake_requested = false;
+            display_wake();
         }
 
-        xSemaphoreTake(s_render_mutex, portMAX_DELAY);
+        if (s_state_changed) {
+            s_state_changed = false;
+            s_current_state = s_pending_state;
+
+            // Update background color
+            lvgl_port_lock(0);
+            lv_obj_set_style_bg_opa(s_screen, LV_OPA_COVER, 0);
+            lv_obj_set_style_bg_color(s_screen, lv_color_hex(STATE_BG_COLORS[s_current_state]), 0);
+            lvgl_port_unlock();
+
+            // Reset behavior
+            s_behav_state = BEHAV_IDLE;
+            s_state_timer = 0;
+            set_anim_by_name("idle", s_facing);
+
+            ESP_LOGI(TAG, "State visual applied: %s", pw_agent_state_to_string(s_current_state));
+        }
+
+        if (s_msg_pending) {
+            s_msg_pending = false;
+            lvgl_port_lock(0);
+            pw_dialog_show(s_pending_msg, s_pending_msg_level);
+            lvgl_port_unlock();
+        }
+
+        // --- Normal render cycle ---
 
         // Check display sleep timeout
         int64_t now_ms = esp_timer_get_time() / 1000;
@@ -578,7 +574,6 @@ static void renderer_task(void *arg)
             lvgl_port_unlock();
         }
 
-        xSemaphoreGive(s_render_mutex);
         vTaskDelay(s_display_sleeping ? pdMS_TO_TICKS(1000) : frame_delay);
     }
 }
