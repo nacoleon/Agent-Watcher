@@ -28,6 +28,15 @@
 #define PW_SD_MOUNT_POINT      "/sdcard"
 #define PW_SD_CHARACTER_DIR    "/sdcard/characters"
 
+// Backgrounds sheet (Pictlogica FF battle backgrounds)
+#define PW_BG_SHEET_COLS       6
+#define PW_BG_SHEET_ROWS       14
+#define PW_BG_CELL_W           240
+#define PW_BG_CELL_H           170
+#define PW_BG_SHEET_W          1447
+#define PW_BG_SHEET_H          2453
+#define PW_BG_SEPARATOR        1      // 1px white separator between cells
+
 // NVS namespace
 #define PW_NVS_NAMESPACE       "pokewatcher"
 

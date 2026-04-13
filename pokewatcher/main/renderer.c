@@ -13,13 +13,21 @@
 #include "freertos/semphr.h"
 #include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 static const char *TAG = "pw_renderer";
 
 static SemaphoreHandle_t s_render_mutex = NULL;
 
 static lv_obj_t *s_screen = NULL;
+static lv_obj_t *s_bg_img = NULL;
 static lv_obj_t *s_sprite_img = NULL;
+
+// Background state
+static uint8_t *s_bg_buf = NULL;
+static lv_img_dsc_t s_bg_dsc = {};
+static bool s_bg_available = false;
+static char s_bg_path[300] = "";
 
 static pw_sprite_data_t s_sprite = {};
 static pw_agent_state_t s_current_state = PW_STATE_IDLE;
@@ -38,6 +46,70 @@ static const uint32_t STATE_BG_COLORS[] = {
     [PW_STATE_SLEEPING]  = 0x404060,
     [PW_STATE_REPORTING] = 0xFDE8C8,
 };
+
+// --- Background indices per state (matching dashboard) ---
+#define BG_PER_STATE 12
+static const uint8_t STATE_BGS[][BG_PER_STATE] = {
+    [PW_STATE_IDLE]      = {2, 5, 10, 11, 15, 27, 42, 50, 70, 71, 75, 25},
+    [PW_STATE_WORKING]   = {26, 30, 31, 37, 44, 46, 33, 81, 20, 41, 12, 59},
+    [PW_STATE_WAITING]   = {28, 32, 36, 45, 54, 55, 66, 68, 79, 83, 6, 75},
+    [PW_STATE_ALERT]     = {8, 13, 38, 39, 48, 53, 56, 58, 60, 61, 76, 29},
+    [PW_STATE_GREETING]  = {1, 6, 17, 29, 40, 49, 51, 52, 64, 72, 74, 50},
+    [PW_STATE_SLEEPING]  = {3, 4, 24, 33, 34, 35, 43, 47, 62, 63, 69, 77},
+    [PW_STATE_REPORTING] = {7, 12, 16, 20, 41, 57, 59, 78, 80, 10, 46, 83},
+};
+
+static bool load_background_tile(int bg_idx)
+{
+    if (!s_bg_available || s_bg_path[0] == '\0') return false;
+
+    FILE *f = fopen(s_bg_path, "rb");
+    if (!f) return false;
+
+    // Calculate position in the raw file
+    // Raw file has 4-byte header (width, height) then pixel data row by row
+    int col = bg_idx % PW_BG_SHEET_COLS;
+    int row = bg_idx / PW_BG_SHEET_COLS;
+    int tile_x = PW_BG_SEPARATOR + col * (PW_BG_CELL_W + PW_BG_SEPARATOR);
+    int tile_y = PW_BG_SEPARATOR + row * (PW_BG_CELL_H + PW_BG_SEPARATOR);
+
+    // Allocate scaled buffer (412x412 RGB565 = 339488 bytes)
+    size_t dst_size = PW_DISPLAY_WIDTH * PW_DISPLAY_HEIGHT * 2;
+    if (!s_bg_buf) {
+        s_bg_buf = heap_caps_malloc(dst_size, MALLOC_CAP_SPIRAM);
+        if (!s_bg_buf) { fclose(f); return false; }
+    }
+
+    // Read tile row by row and scale to display size
+    uint16_t *dst = (uint16_t *)s_bg_buf;
+    uint16_t row_buf[PW_BG_CELL_W];
+
+    for (int dy = 0; dy < PW_DISPLAY_HEIGHT; dy++) {
+        // Map display row to source row
+        int sy = tile_y + (dy * PW_BG_CELL_H / PW_DISPLAY_HEIGHT);
+        // Seek to the start of this row in the raw file (skip 4-byte header)
+        long offset = 4 + (sy * PW_BG_SHEET_W + tile_x) * 2;
+        fseek(f, offset, SEEK_SET);
+        fread(row_buf, 2, PW_BG_CELL_W, f);
+
+        for (int dx = 0; dx < PW_DISPLAY_WIDTH; dx++) {
+            int sx = dx * PW_BG_CELL_W / PW_DISPLAY_WIDTH;
+            dst[dy * PW_DISPLAY_WIDTH + dx] = row_buf[sx];
+        }
+    }
+    fclose(f);
+
+    // Set up LVGL image descriptor
+    s_bg_dsc.header.cf = LV_IMG_CF_TRUE_COLOR;
+    s_bg_dsc.header.always_zero = 0;
+    s_bg_dsc.header.reserved = 0;
+    s_bg_dsc.header.w = PW_DISPLAY_WIDTH;
+    s_bg_dsc.header.h = PW_DISPLAY_HEIGHT;
+    s_bg_dsc.data_size = dst_size;
+    s_bg_dsc.data = s_bg_buf;
+
+    return true;
+}
 
 // --- Behavior state machine (matches web UI) ---
 
@@ -324,6 +396,12 @@ void pw_renderer_init(void)
     lv_obj_set_style_radius(s_screen, PW_DISPLAY_WIDTH / 2, 0);
     lv_obj_set_style_clip_corner(s_screen, true, 0);
 
+    // Background image (behind sprite, full screen)
+    s_bg_img = lv_img_create(s_screen);
+    lv_obj_remove_style_all(s_bg_img);
+    lv_obj_set_pos(s_bg_img, 0, 0);
+    lv_obj_add_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);  // hidden until loaded
+
     s_sprite_img = lv_img_create(s_screen);
     lv_obj_remove_style_all(s_sprite_img);  // Strip default theme bg/border
     // Start centered — position will be updated by behavior_tick
@@ -375,6 +453,19 @@ bool pw_renderer_load_character(const char *character_id)
     s_state_timer = 0;
     update_frame();
 
+    // Check for backgrounds file
+    snprintf(s_bg_path, sizeof(s_bg_path), "%s/%s/backgrounds.raw", PW_SD_CHARACTER_DIR, character_id);
+    FILE *bf = fopen(s_bg_path, "rb");
+    if (bf) {
+        fclose(bf);
+        s_bg_available = true;
+        ESP_LOGI(TAG, "Background sheet found: %s", s_bg_path);
+    } else {
+        s_bg_available = false;
+        s_bg_path[0] = '\0';
+        ESP_LOGW(TAG, "No background sheet found, using solid colors");
+    }
+
     xSemaphoreGive(s_render_mutex);
     ESP_LOGI(TAG, "Loaded character: %s", character_id);
     return true;
@@ -387,9 +478,22 @@ void pw_renderer_set_state(pw_agent_state_t state)
     display_wake();
     s_current_state = state;
 
-    // Update background color
+    // Update background — try image first, fallback to solid color
     if (s_screen) {
         lvgl_port_lock(0);
+        bool bg_loaded = false;
+        if (s_bg_available && state < PW_STATE_COUNT) {
+            int pick = STATE_BGS[state][simple_rand() % BG_PER_STATE];
+            if (load_background_tile(pick)) {
+                lv_img_cache_invalidate_src(&s_bg_dsc);
+                lv_img_set_src(s_bg_img, &s_bg_dsc);
+                lv_obj_clear_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
+                bg_loaded = true;
+            }
+        }
+        if (!bg_loaded) {
+            lv_obj_add_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
+        }
         lv_obj_set_style_bg_color(s_screen, lv_color_hex(STATE_BG_COLORS[state]), 0);
         lvgl_port_unlock();
     }
