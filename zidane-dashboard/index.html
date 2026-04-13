@@ -388,6 +388,37 @@
                 ctx.lineWidth = 2;
                 ctx.stroke();
 
+                // Speech tail triangle — bottom-right, pointing down toward Zidane
+                const tailX = boxX + boxW * 0.75;  // 6/8 = 75% from left
+                const tailW = 12;
+                const tailH = 14;
+                // Fill triangle (same gray as box)
+                ctx.fillStyle = '#707880';
+                ctx.beginPath();
+                ctx.moveTo(tailX, clampedBoxY + boxH);
+                ctx.lineTo(tailX + tailW, clampedBoxY + boxH);
+                ctx.lineTo(tailX + tailW - 2, clampedBoxY + boxH + tailH);
+                ctx.closePath();
+                ctx.fill();
+                // Add dots to triangle to match texture
+                ctx.fillStyle = 'rgba(0,0,0,0.15)';
+                for (let ty = 0; ty < tailH; ty += 2) {
+                    for (let tx = 0; tx < tailW; tx += 2) {
+                        const seed = (tx * 7 + ty * 13 + tx * ty) & 0xFF;
+                        if (seed < 40) {
+                            ctx.fillRect(tailX + tx, clampedBoxY + boxH + ty, 1, 1);
+                        }
+                    }
+                }
+                // Border on triangle sides (not the top edge which merges with box)
+                ctx.strokeStyle = '#888888';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(tailX, clampedBoxY + boxH);
+                ctx.lineTo(tailX + tailW - 2, clampedBoxY + boxH + tailH);
+                ctx.lineTo(tailX + tailW, clampedBoxY + boxH);
+                ctx.stroke();
+
                 // Clip text to box
                 ctx.save();
                 ctx.beginPath();
