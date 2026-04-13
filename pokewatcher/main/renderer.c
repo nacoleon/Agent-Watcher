@@ -50,6 +50,8 @@ static const uint32_t STATE_BG_COLORS[] = {
 };
 
 // --- Background indices per state (matching dashboard) ---
+// Disabled: SD card too slow for runtime loading. Re-enable when cached in PSRAM.
+#if 0
 #define BG_PER_STATE 12
 static const uint8_t STATE_BGS[][BG_PER_STATE] = {
     [PW_STATE_IDLE]      = {2, 5, 10, 11, 15, 27, 42, 50, 70, 71, 75, 25},
@@ -60,6 +62,7 @@ static const uint8_t STATE_BGS[][BG_PER_STATE] = {
     [PW_STATE_SLEEPING]  = {3, 4, 24, 33, 34, 35, 43, 47, 62, 63, 69, 77},
     [PW_STATE_REPORTING] = {7, 12, 16, 20, 41, 57, 59, 78, 80, 10, 46, 83},
 };
+#endif
 
 static bool load_background_tile(int bg_idx)
 {
@@ -501,10 +504,12 @@ void pw_renderer_set_state(pw_agent_state_t state)
         lv_obj_add_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
         lvgl_port_unlock();
 
-        if (s_bg_available && state < PW_STATE_COUNT) {
-            s_bg_pending_idx = STATE_BGS[state][simple_rand() % BG_PER_STATE];
-            s_bg_needs_load = true;
-        }
+        // Background loading disabled — causes freeze on 400kHz SD card
+        // TODO: re-enable when SD card speed is increased or backgrounds are cached in PSRAM
+        // if (s_bg_available && state < PW_STATE_COUNT) {
+        //     s_bg_pending_idx = STATE_BGS[state][simple_rand() % BG_PER_STATE];
+        //     s_bg_needs_load = true;
+        // }
     }
 
     // Reset to idle behavior
