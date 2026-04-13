@@ -3,12 +3,11 @@ idf_component_register(
         "app_main.c"
         "event_queue.c"
         "himax_task.c"
-        "mood_engine.c"
+        "agent_state.c"
         "renderer.c"
         "sprite_loader.c"
-        "llm_task.c"
+        "dialog.c"
         "web_server.c"
-        "roster.c"
     INCLUDE_DIRS "."
     REQUIRES
         nvs_flash
@@ -30,8 +29,6 @@ idf_component_register(
         driver
     EMBED_FILES
         "web/index.html"
-        "web/roster.html"
-        "web/settings.html"
         "web/style.css"
         "web/app.js"
 )
