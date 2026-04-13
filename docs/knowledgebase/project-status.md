@@ -70,6 +70,109 @@ Last updated: 2026-04-13
 - [ ] Dashboard (8091) should proxy to real Watcher (10.0.0.40) instead of mock data
 - [ ] Sync dashboard state controls with actual Watcher state
 
+### Match Firmware to Dashboard (Priority)
+
+The web dashboard at localhost:8091 (`zidane-dashboard/index.html`) is the design reference. The firmware renderer needs to match it. Here's what's different and how to fix each:
+
+#### 1. Per-State Animations in sprite_loader.c
+
+**Dashboard has**: alert=combat stance, greeting=walk cycle, sleeping=still front, working=side-run
+**Firmware has**: everything maps to `idle_down` or `walk_down`
+
+Fix: Update `state_anim_map[]` in `pokewatcher/main/sprite_loader.c` (line ~77):
+```c
+static const char *state_anim_map[] = {
+    [PW_STATE_IDLE]      = "idle_down",
+    [PW_STATE_WORKING]   = "working",      // was "walk_down"
+    [PW_STATE_WAITING]   = "waiting",      // was "idle_down"
+    [PW_STATE_ALERT]     = "alert",        // was "walk_down"
+    [PW_STATE_GREETING]  = "greeting",     // already correct
+    [PW_STATE_SLEEPING]  = "sleeping",     // already correct
+    [PW_STATE_REPORTING] = "reporting",    // was "idle_down"
+};
+```
+These animation names match the `frames.json` on the SD card which already has all 14 animations defined.
+
+#### 2. Fixed-Position States in renderer.c
+
+**Dashboard has**: alert, greeting, sleeping, waiting, reporting lock sprite to center (no wandering)
+**Firmware has**: all states wander based on behavior params
+
+Fix: In `prepare_frame()` in `renderer.c`, add a check before `behavior_tick()`:
+```c
+// States that stay centered — no wandering
+static const bool FIXED_STATES[] = {
+    [PW_STATE_IDLE] = false,
+    [PW_STATE_WORKING] = false,    // working still wanders
+    [PW_STATE_WAITING] = true,
+    [PW_STATE_ALERT] = true,
+    [PW_STATE_GREETING] = true,
+    [PW_STATE_SLEEPING] = true,
+    [PW_STATE_REPORTING] = true,
+};
+
+if (FIXED_STATES[s_current_state]) {
+    s_pos_x10 = CENTER_X * 10;
+    s_pos_y10 = CENTER_Y * 10;
+    // Still advance animation frames but don't move
+} else {
+    behavior_tick();
+}
+```
+For fixed states, still cycle animation frames (the sprite animates in place) but skip the behavior walk/turn/pause logic.
+
+#### 3. ZZZ Overlay for Sleeping
+
+**Dashboard has**: floating z's drifting upward above Zidane
+**Firmware has**: nothing
+
+Fix: In `commit_frame()` (inside the lvgl_port_lock section), after the sprite is drawn, check if sleeping and draw z's using an LVGL label:
+- Create an `lv_label` during init with "z Z z" text, hidden by default
+- In commit_frame, if state==SLEEPING, show it positioned above sprite with a slow Y offset animation
+- Keep it simple — a static "z Z z" label above the sprite is fine, don't need floating animation initially
+- **WARNING**: Only set label text/position, don't create/destroy objects per frame (SPI conflict risk)
+
+#### 4. Behavior Params
+
+**Dashboard has** (in STATE_BEHAVIOR):
+```
+alert:     walkChance=0, speed=0, bounceAmp=0      (completely still)
+greeting:  walkChance=0, speed=0, bounceAmp=0      (completely still)
+waiting:   walkChance=0.005, speed=0.8              (barely moves)
+sleeping:  walkChance=0.003, speed=0.5              (barely moves)
+reporting: walkChance=0.01, speed=1.0               (barely moves)
+```
+
+**Firmware has** (in STATE_BEHAVIORS):
+```
+alert:     walkChance=0, speed=0, bounceAmp=0       ✓ matches
+greeting:  walkChance=0, speed=0, bounceAmp=0       ✓ matches
+waiting:   walkChance=5, speed=8                     ✗ too active
+sleeping:  walkChance=3, speed=5                     ✗ too active
+reporting: walkChance=10, speed=10                   ✗ too active
+```
+
+Fix: Update STATE_BEHAVIORS in renderer.c to use 0 walk/turn chance for fixed states. The fixed-position check (item 2 above) makes this redundant but update the values anyway for consistency.
+
+#### 5. Background Images (Deferred)
+
+**Dashboard has**: 84 Pictlogica FF backgrounds cycling per state
+**Firmware has**: solid colors only (bg tile loading disabled due to SPI conflict)
+
+This is the hardest to fix. Best approach: at boot (before Himax starts), pre-load one background per state into PSRAM (~340KB each × 7 states = 2.4MB). Then on state change, just swap the LVGL image source pointer — no file I/O needed during runtime. This avoids the SPI conflict entirely.
+
+#### Reference: Dashboard Animation Names → frames.json
+| Dashboard anim | frames.json key | Frames used |
+|---------------|----------------|-------------|
+| idle (down/up/left/right) | idle_down, idle_up, idle_left, idle_right | front/back/side standing |
+| walk (directions) | walk_down, walk_up, walk_left, walk_right | walk cycles |
+| greeting | greeting | front walk cycle (bouncy) |
+| sleeping | sleeping | front1 still frame |
+| working | working | side-run (act1 row) |
+| alert | alert | combat stance (act2+act3 rows) |
+| reporting | reporting | front standing (front1, front5) |
+| waiting | waiting | front standing (front1, front5) |
+
 ### Future Features (from design spec)
 - [ ] Audio/speaker output (hardware ready)
 - [ ] RGB LED integration (hardware ready)

@@ -40,7 +40,7 @@ static lv_img_dsc_t s_frame_dsc = {};
 
 // --- Background colors per agent state ---
 static const uint32_t STATE_BG_COLORS[] = {
-    [PW_STATE_IDLE]      = 0xFF0000,  // BRIGHT RED for testing
+    [PW_STATE_IDLE]      = 0xF5B882,  // Sandy peach
     [PW_STATE_WORKING]   = 0xE8F0E8,
     [PW_STATE_WAITING]   = 0xE8E0F0,
     [PW_STATE_ALERT]     = 0x402020,
