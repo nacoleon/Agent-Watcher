@@ -147,9 +147,11 @@
             const b = STATE_BEHAVIOR[currentState] || STATE_BEHAVIOR.idle;
             stateTimer++;
 
-            // Fixed-animation states: no wandering, just play the animation
+            // Fixed-animation states: no wandering, lock to center, just play the animation
             if (FIXED_ANIM_STATES[currentState]) {
                 setAnim(FIXED_ANIM_STATES[currentState]);
+                posX = CENTER;
+                posY = CENTER;
                 return;
             }
 
