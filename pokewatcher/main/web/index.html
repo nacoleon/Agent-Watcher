@@ -3,250 +3,108 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PokéWatcher</title>
-    <link rel="stylesheet" href="/style.css">
+    <title>Zidane Watcher</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Courier New',monospace; background:#0a0a1e; color:#e0e0e0; max-width:500px; margin:0 auto; padding:16px; }
+        h1 { font-size:20px; color:#7BE87B; margin-bottom:4px; }
+        .sub { font-size:12px; color:#5566AA; margin-bottom:16px; }
+        .card { background:linear-gradient(180deg,#1a1a4e,#0f0f2e); border:1px solid #2a2a5e; border-radius:12px; padding:14px; margin-bottom:12px; }
+        .stat { display:flex; align-items:center; gap:10px; padding:5px 0; font-size:13px; }
+        .label { color:#5566AA; min-width:80px; }
+        .badge { display:inline-block; padding:3px 12px; border-radius:10px; font-size:12px; font-weight:bold; text-transform:uppercase; letter-spacing:1px; }
+        .s-idle { background:#FDE8C8; color:#1a1a2e; }
+        .s-working { background:#55AA66; color:#1a1a2e; }
+        .s-waiting { background:#AAAA55; color:#1a1a2e; }
+        .s-alert { background:#AA5555; color:#fff; }
+        .s-greeting { background:#FFF0C0; color:#1a1a2e; }
+        .s-sleeping { background:#636e72; color:#fff; }
+        .s-reporting { background:#5566AA; color:#fff; }
+        .btns { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
+        .btns button { background:#1a1a4e; color:#7BE87B; border:1px solid #2a2a5e; padding:6px 10px; border-radius:6px; cursor:pointer; font-family:inherit; font-size:11px; }
+        .btns button:hover { background:#2a2a5e; }
+        .btns button.on { background:#5566AA; color:#fff; border-color:#7788cc; }
+        .msg-row { display:flex; gap:6px; margin:12px 0; }
+        .msg-row input { flex:1; padding:7px 10px; background:#1a1a4e; border:1px solid #2a2a5e; border-radius:6px; color:#e0e0e0; font-family:inherit; font-size:12px; }
+        .msg-row button { background:#55AA66; color:#0a0a1e; border:none; padding:7px 14px; border-radius:6px; cursor:pointer; font-weight:bold; font-family:inherit; }
+        .reboot { background:#AA5555; color:#fff; border:none; padding:10px 20px; border-radius:6px; cursor:pointer; font-family:inherit; font-weight:bold; width:100%; margin-top:12px; }
+        .reboot:hover { background:#cc6666; }
+        h2 { font-size:13px; color:#5566AA; text-transform:uppercase; letter-spacing:1px; margin:14px 0 6px; }
+    </style>
 </head>
 <body>
-    <nav>
-        <a href="/" class="active">Status</a>
-        <a href="/roster">Roster</a>
-        <a href="/settings">Settings</a>
-    </nav>
-    <main>
-        <div class="sprite-display" id="sprite-display">
-            <div class="watch-bezel">
-                <div class="watch-screen">
-                    <canvas id="sprite-canvas" width="400" height="400"></canvas>
-                </div>
-            </div>
-        </div>
-        <h1 id="pokemon-name">Loading...</h1>
-        <div class="mood-badge" id="mood-badge">--</div>
-        <div class="status-card">
-            <div class="stat">
-                <span class="label">Person</span>
-                <span id="person-status">--</span>
-            </div>
-            <div class="stat">
-                <span class="label">Evolution</span>
-                <div class="progress-bar">
-                    <div class="progress-fill" id="evo-bar"></div>
-                </div>
-                <span id="evo-text">--</span>
-            </div>
-        </div>
-        <h2>Commentary</h2>
-        <div id="timeline"></div>
-    </main>
-    <script src="/app.js"></script>
+    <h1>Zidane</h1>
+    <div class="sub">OpenClaw Desk Companion</div>
+
+    <div class="card">
+        <div class="stat"><span class="label">State</span><span class="badge" id="state-badge">--</span></div>
+        <div class="stat"><span class="label">Person</span><span id="person">--</span></div>
+        <div class="stat"><span class="label">Uptime</span><span id="uptime">--</span></div>
+        <div class="stat"><span class="label">WiFi</span><span id="rssi">--</span></div>
+        <div class="stat"><span class="label">Last Msg</span><span id="msg">--</span></div>
+    </div>
+
+    <h2>State</h2>
+    <div class="btns" id="btns"></div>
+
+    <h2>Message</h2>
+    <div class="msg-row">
+        <input id="txt" placeholder="Send message..." maxlength="200">
+        <button onclick="sendMsg()">Send</button>
+    </div>
+
+    <button class="reboot" onclick="reboot()">Reboot Watcher</button>
+
     <script>
-        let spriteImg = null;
-        let framesData = null;
-        let currentPokemon = '';
-        let currentMood = 'happy';
+        const STATES = ['idle','working','waiting','alert','greeting','sleeping','reporting'];
+        let cur = 'idle';
 
-        // Animation state
-        let animFrame = 0;
-        let animName = 'idle_down';
-        let animTimer = null;
+        // Build state buttons
+        const el = document.getElementById('btns');
+        STATES.forEach(s => {
+            const b = document.createElement('button');
+            b.textContent = s;
+            b.onclick = async () => {
+                await fetch('/api/agent-state', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({state:s}) });
+                poll();
+            };
+            el.appendChild(b);
+        });
 
-        // Canvas is 400x400 to match the real 412x412 watch display
-        // Sprite drawn at 4x scale (32*4=128px) — matches device renderer
-        const CANVAS_SIZE = 400;
-        const DRAW_SCALE = 4;
-        const SPRITE_HALF = 16 * DRAW_SCALE;
-        const POS_MIN = SPRITE_HALF + 10;
-        const POS_MAX = CANVAS_SIZE - SPRITE_HALF - 10;
-        const CENTER = CANVAS_SIZE / 2;
+        async function sendMsg() {
+            const inp = document.getElementById('txt');
+            const t = inp.value.trim();
+            if (!t) return;
+            await fetch('/api/message', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:t, level:'info'}) });
+            inp.value = '';
+            poll();
+        }
+        document.getElementById('txt').addEventListener('keypress', e => { if (e.key === 'Enter') sendMsg(); });
 
-        // Position
-        let posX = CENTER, posY = CENTER;
-        let facing = 'down';
-
-        // State machine: idle, turning, walking, pausing
-        let state = 'idle';
-        let stateTimer = 0;
-        let walkDir = { x: 0, y: 0 };
-        let walkStepsLeft = 0;
-
-        // Mood-driven behavior
-        const MOOD_BEHAVIOR = {
-            excited:   { walkChance: 0.06, turnChance: 0.04, walkSteps: [8,20],  speed: 2.5, bounceAmp: 3, pauseTicks: [10,30] },
-            happy:     { walkChance: 0.03, turnChance: 0.02, walkSteps: [6,14],  speed: 1.5, bounceAmp: 0, pauseTicks: [30,80] },
-            curious:   { walkChance: 0.02, turnChance: 0.06, walkSteps: [4,10],  speed: 1.0, bounceAmp: 0, pauseTicks: [20,50] },
-            lonely:    { walkChance: 0.01, turnChance: 0.01, walkSteps: [3,8],   speed: 0.8, bounceAmp: 0, pauseTicks: [60,150] },
-            sleepy:    { walkChance: 0.003,turnChance: 0.005,walkSteps: [2,5],   speed: 0.5, bounceAmp: 0, pauseTicks: [100,250] },
-            overjoyed: { walkChance: 0.08, turnChance: 0.05, walkSteps: [10,25], speed: 3.0, bounceAmp: 4, pauseTicks: [5,15] },
-        };
-
-        const DIRS = ['down', 'up', 'left', 'right'];
-        const DIR_VEC = { down: {x:0,y:1}, up: {x:0,y:-1}, left: {x:-1,y:0}, right: {x:1,y:0} };
-
-        function getAnim(name) {
-            return framesData && framesData.animations && framesData.animations[name];
+        async function reboot() {
+            if (!confirm('Reboot the Watcher?')) return;
+            try { await fetch('/api/reboot', { method:'POST' }); } catch(e) {}
+            document.body.innerHTML = '<div style="text-align:center;margin-top:40vh;color:#7BE87B;font-family:monospace"><h2>Rebooting...</h2><p>Refresh in 10 seconds</p></div>';
         }
 
-        function setAnim(name) {
-            if (animName === name) return;
-            animName = name;
-            animFrame = 0;
-        }
-
-        function clampPos() {
-            posX = Math.max(POS_MIN, Math.min(POS_MAX, posX));
-            posY = Math.max(POS_MIN, Math.min(POS_MAX, posY));
-        }
-
-        function pickWalkDir() {
-            // Prefer directions that keep us near center
-            const toCenter = { x: CENTER - posX, y: CENTER - posY };
-            const distFromCenter = Math.sqrt(toCenter.x * toCenter.x + toCenter.y * toCenter.y);
-
-            // 60% chance to walk toward center if far away, otherwise random
-            if (distFromCenter > 40 && Math.random() < 0.6) {
-                if (Math.abs(toCenter.x) > Math.abs(toCenter.y)) {
-                    facing = toCenter.x > 0 ? 'right' : 'left';
-                } else {
-                    facing = toCenter.y > 0 ? 'down' : 'up';
-                }
-            } else {
-                facing = DIRS[Math.floor(Math.random() * 4)];
-            }
-            walkDir = DIR_VEC[facing];
-        }
-
-        function behaviorTick() {
-            const b = MOOD_BEHAVIOR[currentMood] || MOOD_BEHAVIOR.happy;
-            stateTimer++;
-
-            switch (state) {
-            case 'idle':
-                setAnim('idle_' + facing);
-                // Randomly decide to do something
-                if (Math.random() < b.turnChance) {
-                    // Just look a different direction
-                    facing = DIRS[Math.floor(Math.random() * 4)];
-                    setAnim('idle_' + facing);
-                    state = 'pausing';
-                    stateTimer = 0;
-                } else if (Math.random() < b.walkChance) {
-                    // Start a short walk
-                    pickWalkDir();
-                    const [min, max] = b.walkSteps;
-                    walkStepsLeft = min + Math.floor(Math.random() * (max - min));
-                    state = 'walking';
-                    stateTimer = 0;
-                }
-                break;
-
-            case 'walking':
-                setAnim('walk_' + facing);
-                posX += walkDir.x * b.speed;
-                posY += walkDir.y * b.speed;
-                clampPos();
-                walkStepsLeft--;
-
-                // Stop if we hit the edge or finished steps
-                if (walkStepsLeft <= 0 || posX <= POS_MIN || posX >= POS_MAX || posY <= POS_MIN || posY >= POS_MAX) {
-                    state = 'pausing';
-                    stateTimer = 0;
-                    setAnim('idle_' + facing);
-                }
-                break;
-
-            case 'pausing':
-                setAnim('idle_' + facing);
-                const [pMin, pMax] = b.pauseTicks;
-                if (stateTimer > pMin + Math.random() * (pMax - pMin)) {
-                    state = 'idle';
-                    stateTimer = 0;
-                }
-                break;
-            }
-        }
-
-        let frameTick = 0;
-        function drawFrame() {
-            if (!spriteImg || !framesData) return;
-
-            behaviorTick();
-            clampPos();
-
-            const canvas = document.getElementById('sprite-canvas');
-            const ctx = canvas.getContext('2d');
-            const anim = getAnim(animName);
-            if (!anim) return;
-
-            const frame = anim.frames[animFrame];
-            const fw = framesData.frame_width;
-            const fh = framesData.frame_height;
-
-            // Clear to transparent
-            ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-
-            // Bounce effect for excited/overjoyed
-            const b = MOOD_BEHAVIOR[currentMood] || MOOD_BEHAVIOR.happy;
-            const bounceY = b.bounceAmp > 0 ? Math.sin(frameTick * 0.3) * b.bounceAmp : 0;
-
-            // Draw sprite centered at position
-            const drawW = fw * DRAW_SCALE;
-            const drawH = fh * DRAW_SCALE;
-            const drawX = posX - drawW / 2;
-            const drawY = posY - drawH / 2 + bounceY;
-
-            ctx.imageSmoothingEnabled = false;
-            ctx.drawImage(spriteImg, frame.x, frame.y, fw, fh, drawX, drawY, drawW, drawH);
-
-            // Advance sprite frame — slow cycle for 2-frame walk (every 6 ticks = ~300ms)
-            frameTick++;
-            if (frameTick % 6 === 0) {
-                animFrame = (animFrame + 1) % anim.frames.length;
-            }
-        }
-
-        async function loadSprite(pokemonId, mood) {
-            if (currentPokemon !== pokemonId) {
-                currentPokemon = pokemonId;
-                spriteImg = new Image();
-                spriteImg.src = '/sprites/' + pokemonId;
-                await new Promise(r => { spriteImg.onload = r; spriteImg.onerror = r; });
-                try {
-                    const fRes = await fetch('/frames/' + pokemonId);
-                    framesData = await fRes.json();
-                } catch(e) { framesData = null; }
-            }
-            currentMood = mood;
-            if (!animTimer) {
-                animTimer = setInterval(drawFrame, 50);
-                drawFrame();
-            }
-        }
-
-        async function updateStatus() {
+        async function poll() {
             try {
-                const res = await fetch('/api/status');
-                const d = await res.json();
-                document.getElementById('pokemon-name').textContent = d.active_pokemon || 'No Pokemon';
-                document.getElementById('mood-badge').textContent = d.mood;
-                document.getElementById('mood-badge').className = 'mood-badge mood-' + d.mood;
-                document.getElementById('person-status').textContent = d.person_present ? 'Here' : 'Away';
-                const hours = (d.evolution_seconds / 3600).toFixed(1);
-                const threshold = d.evolution_threshold_hours || 24;
-                const pct = Math.min(100, (d.evolution_seconds / (threshold * 3600)) * 100);
-                document.getElementById('evo-bar').style.width = pct + '%';
-                document.getElementById('evo-text').textContent = hours + 'h / ' + threshold + 'h';
-
-                if (d.active_pokemon) loadSprite(d.active_pokemon, d.mood);
-
-                const tRes = await fetch('/api/timeline');
-                const timeline = await tRes.json();
-                const el = document.getElementById('timeline');
-                el.innerHTML = timeline.map(t => '<div class="comment">' + escHtml(t) + '</div>').join('');
-            } catch(e) { console.error(e); }
+                const r = await fetch('/api/status');
+                const d = await r.json();
+                cur = d.agent_state || 'idle';
+                const b = document.getElementById('state-badge');
+                b.textContent = cur;
+                b.className = 'badge s-' + cur;
+                document.getElementById('person').textContent = d.person_present ? 'Present' : 'Away';
+                document.getElementById('uptime').textContent = fmt(d.uptime_seconds);
+                document.getElementById('rssi').textContent = (d.wifi_rssi || '--') + ' dBm';
+                document.getElementById('msg').textContent = d.last_message || 'None';
+                document.querySelectorAll('.btns button').forEach(b => b.className = b.textContent === cur ? 'on' : '');
+            } catch(e) {}
         }
-        function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-        updateStatus();
-        setInterval(updateStatus, 5000);
+        function fmt(s) { const h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h>0?h+'h '+m+'m':m+'m'; }
+        poll();
+        setInterval(poll, 5000);
     </script>
 </body>
 </html>
