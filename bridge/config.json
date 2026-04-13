@@ -1,5 +1,5 @@
 {
-  "watcher_url": "http://zidane.local",
+  "watcher_url": "http://10.0.0.40",
   "bridge_port": 3847,
   "poll_interval_ms": 5000,
   "debounce_count": 2,
