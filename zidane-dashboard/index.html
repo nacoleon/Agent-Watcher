@@ -52,6 +52,10 @@
 
         <h2>Timeline</h2>
         <div id="timeline"></div>
+
+        <div style="margin-top:24px; text-align:center;">
+            <button onclick="rebootWatcher()" style="background:#AA5555; color:#fff; padding:10px 24px;">Reboot Watcher</button>
+        </div>
     </main>
     <script>
         let spriteImg = null;
@@ -530,6 +534,14 @@
             return h > 0 ? h + 'h ' + m + 'm' : m + 'm';
         }
         function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+        async function rebootWatcher() {
+            if (!confirm('Reboot the Watcher?')) return;
+            try {
+                await fetch('http://10.0.0.40/api/reboot', { method: 'POST', mode: 'no-cors' });
+            } catch(e) {}
+            alert('Reboot command sent. Wait ~10 seconds for reconnect.');
+        }
 
         loadSprite();
         updateStatus();
