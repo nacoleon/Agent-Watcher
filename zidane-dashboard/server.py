@@ -57,6 +57,8 @@ class ZidaneHandler(SimpleHTTPRequestHandler):
             self._serve_file(os.path.join(DASHBOARD_DIR, 'zidane_spritesheet.png'))
         elif path == '/frames/zidane':
             self._serve_file(os.path.join(DASHBOARD_DIR, 'frames.json'))
+        elif path == '/backgrounds':
+            self._serve_file(os.path.join(DASHBOARD_DIR, 'backgrounds.png'))
         else:
             if path == '/':
                 path = '/index.html'

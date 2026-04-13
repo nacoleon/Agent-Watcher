@@ -87,6 +87,39 @@
             reporting: { walkChance: 0.01, turnChance: 0.01, walkSteps: [3,6],   speed: 1.0, bounceAmp: 0, pauseTicks: [50,100], bgColor: '#FDE8C8' },
         };
 
+        // Background images per state (12 each, indices into backgrounds sheet)
+        // Grid: 6 cols x 14 rows, each 240x170, 1px white separators
+        // Position: col_starts=[1,242,483,724,965,1206], row_starts=[1,172,343,514,685,856,1027,1198,1369,1540,1711,1882,2053,2224]
+        const BG_COL_STARTS = [1, 242, 483, 724, 965, 1206];
+        const BG_ROW_STARTS = [1, 172, 343, 514, 685, 856, 1027, 1198, 1369, 1540, 1711, 1882, 2053, 2224];
+        const BG_CELL_W = 240, BG_CELL_H = 170;
+
+        function bgPos(idx) {
+            const col = idx % 6, row = Math.floor(idx / 6);
+            return { x: BG_COL_STARTS[col], y: BG_ROW_STARTS[row] };
+        }
+
+        const STATE_BGS = {
+            // Peaceful greens, fields, meadows, calm nature
+            idle:      [2, 5, 10, 11, 15, 27, 42, 50, 70, 71, 75, 25],
+            // Interiors, castles, structured spaces, active feel
+            working:   [14, 19, 22, 26, 30, 31, 37, 44, 46, 67, 73, 81],
+            // Skies, clouds, ethereal, cool blues, patient
+            waiting:   [9, 18, 28, 32, 36, 45, 54, 55, 66, 68, 79, 83],
+            // Fire, lava, red/warm, danger, dark dramatic
+            alert:     [8, 13, 38, 39, 48, 53, 56, 58, 60, 61, 65, 76],
+            // Bright, warm, cheerful, golden, welcoming
+            greeting:  [1, 6, 17, 21, 29, 40, 49, 51, 52, 64, 72, 74],
+            // Dark, night, deep blues, tranquil, moonlit
+            sleeping:  [3, 4, 24, 33, 34, 35, 43, 47, 62, 63, 69, 77],
+            // Formal, temples, grand halls, structured
+            reporting: [7, 12, 16, 20, 23, 41, 57, 59, 78, 80, 82, 10],
+        };
+
+        let bgSheetImg = null;
+        let currentBgIdx = 0;
+        let lastBgChangeState = '';
+
         const DIRS = ['down', 'up', 'left', 'right'];
         const DIR_VEC = { down: {x:0,y:1}, up: {x:0,y:-1}, left: {x:-1,y:0}, right: {x:1,y:0} };
 
@@ -208,9 +241,21 @@
             const DIALOG_STATES = ['alert', 'greeting', 'reporting'];
             const hasDialog = DIALOG_STATES.includes(currentState);
 
-            // Fill background with state color
-            ctx.fillStyle = b.bgColor;
-            ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+            // Background: use sprite sheet BG if loaded, fallback to solid color
+            if (bgSheetImg && STATE_BGS[currentState]) {
+                // Pick a new BG when state changes
+                if (currentState !== lastBgChangeState) {
+                    const bgs = STATE_BGS[currentState];
+                    currentBgIdx = bgs[Math.floor(Math.random() * bgs.length)];
+                    lastBgChangeState = currentState;
+                }
+                const bp = bgPos(currentBgIdx);
+                // Draw background scaled to fill canvas
+                ctx.drawImage(bgSheetImg, bp.x, bp.y, BG_CELL_W, BG_CELL_H, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+            } else {
+                ctx.fillStyle = b.bgColor;
+                ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+            }
 
             // Bounce
             const bounceY = b.bounceAmp > 0 ? Math.sin(frameTick * 0.3) * b.bounceAmp : 0;
@@ -455,6 +500,10 @@
                 const fRes = await fetch('/frames/zidane');
                 framesData = await fRes.json();
             } catch(e) { framesData = null; }
+            // Load background sheet
+            bgSheetImg = new Image();
+            bgSheetImg.src = '/backgrounds';
+            await new Promise(r => { bgSheetImg.onload = r; bgSheetImg.onerror = () => { bgSheetImg = null; r(); }; });
             if (!animTimer) {
                 animTimer = setInterval(drawFrame, 50);
             }
