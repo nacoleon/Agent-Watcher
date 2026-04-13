@@ -16,10 +16,6 @@
             <div class="watch-bezel">
                 <div class="watch-screen" id="watch-screen">
                     <canvas id="sprite-canvas" width="400" height="400"></canvas>
-                    <div class="dialog-overlay" id="dialog-overlay">
-                        <div class="name">Zidane:</div>
-                        <div class="text" id="dialog-text"></div>
-                    </div>
                 </div>
             </div>
         </div>
@@ -433,17 +429,6 @@
             }
         }
 
-        // Dialog box
-        let dialogTimeout = null;
-        function showDialog(text, level) {
-            const overlay = document.getElementById('dialog-overlay');
-            document.getElementById('dialog-text').textContent = text;
-            overlay.className = 'dialog-overlay visible level-' + (level || 'info');
-            clearTimeout(dialogTimeout);
-            dialogTimeout = setTimeout(() => {
-                overlay.className = 'dialog-overlay';
-            }, 10000);
-        }
 
         // State controls
         const states = ['idle', 'working', 'waiting', 'alert', 'greeting', 'sleeping', 'reporting'];
@@ -471,7 +456,14 @@
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({text, level: 'info'})
             });
-            showDialog(text, 'success');
+            // Switch to reporting so the FF9 dialog box shows the message
+            await fetch('/api/agent-state', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({state: 'reporting'})
+            });
+            lastKnownMessage = text;
+            currentState = 'reporting';
             input.value = '';
             updateStatus();
         }
@@ -500,9 +492,7 @@
                     btn.className = btn.textContent === currentState ? 'active' : '';
                 });
 
-                // Show dialog if there's a new message
-                if (d.last_message && d.last_message !== lastKnownMessage) {
-                    showDialog(d.last_message, 'info');
+                if (d.last_message) {
                     lastKnownMessage = d.last_message;
                 }
 
