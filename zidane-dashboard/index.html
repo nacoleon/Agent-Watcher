@@ -206,6 +206,10 @@
 
             const b = STATE_BEHAVIOR[currentState] || STATE_BEHAVIOR.idle;
 
+            // States that show the FF9 dialog box (sprite shifts up)
+            const DIALOG_STATES = ['alert', 'greeting', 'reporting'];
+            const hasDialog = DIALOG_STATES.includes(currentState);
+
             // Fill background with state color
             ctx.fillStyle = b.bgColor;
             ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
@@ -213,10 +217,13 @@
             // Bounce
             const bounceY = b.bounceAmp > 0 ? Math.sin(frameTick * 0.3) * b.bounceAmp : 0;
 
+            // Shift sprite up when dialog is visible
+            const dialogShiftY = hasDialog ? -55 : 0;
+
             const drawW = fw * DRAW_SCALE;
             const drawH = fh * DRAW_SCALE;
             const drawX = posX - drawW / 2;
-            const drawY = posY - drawH / 2 + bounceY;
+            const drawY = posY - drawH / 2 + bounceY + dialogShiftY;
 
             ctx.imageSmoothingEnabled = false;
             ctx.drawImage(spriteImg, frame.x, frame.y, fw, fh, drawX, drawY, drawW, drawH);
@@ -241,7 +248,7 @@
             // Speech cloud bubble for alert — red tint
             if (currentState === 'alert') {
                 const bobY = Math.sin(frameTick * 0.15) * 3;
-                const bx = posX + 40, by = posY - 70 + bobY;
+                const bx = posX + 40, by = posY - 70 + dialogShiftY + bobY;
 
                 // Cloud shape
                 ctx.fillStyle = '#FFDDDD';
@@ -272,7 +279,7 @@
             // Speech cloud bubble for greeting
             if (currentState === 'greeting') {
                 const bobY = Math.sin(frameTick * 0.12) * 3;
-                const bx = posX + 40, by = posY - 70 + bobY;
+                const bx = posX + 40, by = posY - 70 + dialogShiftY + bobY;
 
                 // Cloud shape — overlapping circles
                 ctx.fillStyle = '#FFFFFF';
@@ -298,6 +305,62 @@
                 ctx.textAlign = 'center';
                 ctx.fillText('Hi!', bx, by + 5);
                 ctx.textAlign = 'left';
+            }
+
+            // --- FF9 Dialog Box (for alert, greeting, reporting) ---
+            if (hasDialog) {
+                const boxW = 280;
+                const boxH = 56;
+                const boxX = (CANVAS_SIZE - boxW) / 2;
+                const boxY = CANVAS_SIZE - 90;
+
+                // Dark blue gradient background
+                const grad = ctx.createLinearGradient(boxX, boxY, boxX, boxY + boxH);
+                grad.addColorStop(0, '#1a1a4e');
+                grad.addColorStop(1, '#0a0a2e');
+                ctx.fillStyle = grad;
+
+                // Rounded rect
+                const r = 8;
+                ctx.beginPath();
+                ctx.moveTo(boxX + r, boxY);
+                ctx.lineTo(boxX + boxW - r, boxY);
+                ctx.quadraticCurveTo(boxX + boxW, boxY, boxX + boxW, boxY + r);
+                ctx.lineTo(boxX + boxW, boxY + boxH - r);
+                ctx.quadraticCurveTo(boxX + boxW, boxY + boxH, boxX + boxW - r, boxY + boxH);
+                ctx.lineTo(boxX + r, boxY + boxH);
+                ctx.quadraticCurveTo(boxX, boxY + boxH, boxX, boxY + boxH - r);
+                ctx.lineTo(boxX, boxY + r);
+                ctx.quadraticCurveTo(boxX, boxY, boxX + r, boxY);
+                ctx.closePath();
+                ctx.fill();
+
+                // Border — color per state
+                const borderColors = { alert: '#AA5555', greeting: '#5566AA', reporting: '#55AA66' };
+                ctx.strokeStyle = borderColors[currentState] || '#5566AA';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // "Zidane:" name label in green
+                ctx.font = 'bold 13px monospace';
+                ctx.fillStyle = '#7BE87B';
+                ctx.textAlign = 'left';
+                ctx.fillText('Zidane:', boxX + 10, boxY + 16);
+
+                // Message text in white
+                const dialogMessages = {
+                    alert: 'Something needs your attention!',
+                    greeting: 'Morning! Ready to get to work.',
+                    reporting: 'Here\'s what happened while you were away.',
+                };
+                // Use last_message if available, otherwise default
+                const msgText = lastKnownMessage || dialogMessages[currentState] || '';
+                ctx.font = '12px monospace';
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillText(msgText.substring(0, 40), boxX + 10, boxY + 36);
+                if (msgText.length > 40) {
+                    ctx.fillText(msgText.substring(40, 80), boxX + 10, boxY + 50);
+                }
             }
 
             frameTick++;
