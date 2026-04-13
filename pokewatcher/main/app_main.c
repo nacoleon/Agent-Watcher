@@ -13,11 +13,9 @@
 
 #include "config.h"
 #include "event_queue.h"
-#include "mood_engine.h"
-#include "roster.h"
+#include "agent_state.h"
 #include "renderer.h"
 #include "himax_task.h"
-#include "llm_task.h"
 #include "web_server.h"
 
 static const char *TAG = "pokewatcher";
@@ -104,109 +102,65 @@ static void init_sdcard(void)
     }
 }
 
-static void on_mood_changed(pw_mood_t old_mood, pw_mood_t new_mood)
+static void on_state_changed(pw_agent_state_t old_state, pw_agent_state_t new_state)
 {
-    ESP_LOGI(TAG, "Mood changed: %s -> %s", pw_mood_to_string(old_mood), pw_mood_to_string(new_mood));
-    pw_renderer_set_mood(new_mood);
-}
-
-static void on_roster_change(const char *pokemon_id)
-{
-    ESP_LOGI(TAG, "Roster change: loading %s", pokemon_id);
-    pw_renderer_load_pokemon(pokemon_id);
-}
-
-static void on_evolution_triggered(void)
-{
-    const char *active = pw_roster_get_active_id();
-    if (active) {
-        pw_pokemon_def_t def;
-        if (pw_pokemon_load_def(active, &def) && def.evolves_to[0] != '\0') {
-            pw_roster_evolve_active();
-            pw_renderer_play_evolution(def.evolves_to);
-            ESP_LOGI(TAG, "Evolution complete: %s -> %s", active, def.evolves_to);
-        }
-    }
+    pw_renderer_set_state(new_state);
+    pw_renderer_wake_display();
+    ESP_LOGI(TAG, "State changed: %s -> %s",
+             pw_agent_state_to_string(old_state),
+             pw_agent_state_to_string(new_state));
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== PokéWatcher v1 starting ===");
+    ESP_LOGI(TAG, "=== Zidane Watcher v2 starting ===");
 
-    // 1. Initialize NVS
+    // [1/7] NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-    ESP_LOGI(TAG, "[1/8] NVS initialized");
+    ESP_LOGI(TAG, "[1/7] NVS initialized");
 
-    // 2. Initialize event queue
+    // [2/7] Event queue
     pw_event_queue_init();
-    ESP_LOGI(TAG, "[2/8] Event queue initialized");
+    ESP_LOGI(TAG, "[2/7] Event queue initialized");
 
-    // 3. Initialize roster (loads from NVS, SD card not needed yet)
-    pw_roster_init();
-    ESP_LOGI(TAG, "[3/8] Roster initialized");
+    // [3/7] Agent state engine
+    pw_agent_state_init();
+    ESP_LOGI(TAG, "[3/7] Agent state initialized");
 
-    // 4. Initialize mood engine
-    pw_mood_engine_init();
-    ESP_LOGI(TAG, "[4/8] Mood engine initialized");
-
-    // 5. Initialize LLM
-    pw_llm_init();
-    ESP_LOGI(TAG, "[5/8] LLM engine initialized");
-
-    // 6. Initialize display & renderer
-    // IO expander must be up first — it powers the LCD (BSP_PWR_LCD) and SD card (BSP_PWR_SDCARD).
-    // bsp_lvgl_init sends SPI init commands to the LCD controller; if the LCD has no power,
-    // those commands are lost and the display stays off.
-    // NOTE: Do NOT call bsp_spi_bus_init() here — it must run inside bsp_lvgl_init() in
-    // the correct order relative to backlight and panel init. The idempotent guard would
-    // cause it to skip the second call, breaking the init sequence.
+    // [4/7] IO expander + renderer
     bsp_io_expander_init();
-    vTaskDelay(pdMS_TO_TICKS(100));  // Let LCD power stabilize
-    ESP_LOGI(TAG, "[6/8] IO expander ready, LCD powered");
-
+    vTaskDelay(pdMS_TO_TICKS(100));
+    ESP_LOGI(TAG, "[4/7] IO expander ready, LCD powered");
     pw_renderer_init();
-    ESP_LOGI(TAG, "[6/8] Renderer initialized");
+    ESP_LOGI(TAG, "[4/7] Renderer initialized");
 
-    // 7. Mount SD card (after renderer, so BSP SPI bus is fully set up)
+    // [5/7] SD card
     init_sdcard();
-    ESP_LOGI(TAG, "[7/8] SD card initialized");
+    ESP_LOGI(TAG, "[5/7] SD card initialized");
 
-    // Auto-add Pikachu if roster is empty (first boot with SD card)
-    const char *active = pw_roster_get_active_id();
-    if (!active) {
-        if (pw_roster_add("pikachu")) {
-            active = pw_roster_get_active_id();
-            ESP_LOGI(TAG, "Auto-added Pikachu to roster");
-        }
+    // [6/7] Load Zidane character
+    if (!pw_renderer_load_character("zidane")) {
+        ESP_LOGW(TAG, "Failed to load Zidane sprites from SD card");
     }
 
-    // Load active Pokemon sprites
-    if (active) {
-        pw_renderer_load_pokemon(active);
-    }
-
-    // 8. Initialize WiFi & start web server
+    // [7/7] WiFi + web server
     init_wifi();
     pw_web_server_start();
-    ESP_LOGI(TAG, "[8/8] WiFi + web server initialized");
+    ESP_LOGI(TAG, "[7/7] WiFi + web server initialized");
 
-    // Register callbacks before starting tasks
-    pw_mood_engine_set_change_cb(on_mood_changed);
-    pw_mood_engine_set_roster_cb(on_roster_change);
-    pw_mood_engine_set_evolution_cb(on_evolution_triggered);
+    // Register callbacks
+    pw_agent_state_set_change_cb(on_state_changed);
 
-    // Start all tasks
+    // Start tasks
     pw_himax_task_start();
-    pw_mood_engine_task_start();
-    pw_llm_task_start();
+    pw_agent_state_task_start();
     pw_renderer_task_start();
 
-    ESP_LOGI(TAG, "=== PokéWatcher v1 running ===");
-    ESP_LOGI(TAG, "Active Pokemon: %s", active ? active : "none");
-    ESP_LOGI(TAG, "Dashboard: http://pokewatcher.local");
+    ESP_LOGI(TAG, "=== Zidane Watcher v2 running ===");
+    ESP_LOGI(TAG, "Dashboard: http://zidane.local");
 }
