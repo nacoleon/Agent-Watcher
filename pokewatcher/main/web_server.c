@@ -158,6 +158,23 @@ static esp_err_t handle_api_message(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t handle_api_reboot(httpd_req_t *req)
+{
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "ok", true);
+    cJSON_AddStringToObject(resp, "message", "Rebooting...");
+    char *json = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
+    free(json);
+
+    // Delay briefly to let the response send, then reboot
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
+}
+
 static void register_routes(httpd_handle_t server)
 {
     httpd_uri_t routes[] = {
@@ -176,6 +193,9 @@ static void register_routes(httpd_handle_t server)
 
     httpd_uri_t message_uri = { .uri = "/api/message", .method = HTTP_POST, .handler = handle_api_message };
     httpd_register_uri_handler(server, &message_uri);
+
+    httpd_uri_t reboot_uri = { .uri = "/api/reboot", .method = HTTP_POST, .handler = handle_api_reboot };
+    httpd_register_uri_handler(server, &reboot_uri);
 }
 
 static void init_mdns(void)
