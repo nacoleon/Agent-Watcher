@@ -1,0 +1,8 @@
+{
+  "watcher_url": "http://zidane.local",
+  "bridge_port": 3847,
+  "poll_interval_ms": 5000,
+  "debounce_count": 2,
+  "events_file": "~/.openclaw/watcher-events.json",
+  "context_file": "~/.openclaw/watcher-context.json"
+}

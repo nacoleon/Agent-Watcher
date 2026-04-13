@@ -12,3 +12,7 @@ pokewatcher/sdkconfig.old
 # Vendored SDK (cloned separately)
 SenseCAP-Watcher-Firmware/
 .gstack/
+
+# Bridge build artifacts
+bridge/node_modules/
+bridge/dist/
