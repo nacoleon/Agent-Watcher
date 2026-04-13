@@ -251,7 +251,18 @@
                 }
                 const bp = bgPos(currentBgIdx);
                 // Draw background scaled to fill canvas
-                ctx.drawImage(bgSheetImg, bp.x, bp.y, BG_CELL_W, BG_CELL_H, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+                // Fit background preserving aspect ratio, letterbox with dark fill
+                const bgAspect = BG_CELL_W / BG_CELL_H;  // 240/170 = 1.41
+                const canvasAspect = 1;  // square
+                let dw, dh, dx, dy;
+                // Background is wider than tall — fit width, letterbox top/bottom
+                dw = CANVAS_SIZE;
+                dh = CANVAS_SIZE / bgAspect;
+                dx = 0;
+                dy = (CANVAS_SIZE - dh) / 2;
+                ctx.fillStyle = '#0a0a1e';
+                ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+                ctx.drawImage(bgSheetImg, bp.x, bp.y, BG_CELL_W, BG_CELL_H, dx, dy, dw, dh);
             } else {
                 ctx.fillStyle = b.bgColor;
                 ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
