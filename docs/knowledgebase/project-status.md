@@ -154,7 +154,55 @@ reporting: walkChance=10, speed=10                   ✗ too active
 
 Fix: Update STATE_BEHAVIORS in renderer.c to use 0 walk/turn chance for fixed states. The fixed-position check (item 2 above) makes this redundant but update the values anyway for consistency.
 
-#### 5. Background Images (Deferred)
+#### 5. FF9 Dialog Box for Alert/Greeting/Reporting
+
+**Dashboard has**: When alert, greeting, or reporting is active, Zidane shifts down and an FF9-style dialog box appears ABOVE him with:
+- Grainy gray background (deterministic black dot pattern, NOT random per frame)
+- Light gray border (#888888)
+- "Zidane" name in white, bold 13px monospace
+- Message text in white, 12px monospace, word-wrapped at 36 chars/line
+- Dynamic height (grows up to 8 lines)
+- Sharp speech tail triangle at 75% from left, pointing down toward Zidane
+- Default messages: alert="Something needs your attention!", greeting="Morning! Ready to get to work.", reporting="Here's what happened while you were away."
+- When a message is sent via API, it replaces the default text
+
+**Firmware has**: FF9 dialog box exists (`dialog.c`) but only shows when `POST /api/message` is called. It does NOT auto-show for alert/greeting/reporting states. No speech tail. No sprite repositioning.
+
+Fix — two parts:
+
+**Part A**: Auto-show dialog for certain states. In the render loop (renderer.c), when state changes to alert/greeting/reporting AND no custom message is pending, auto-show a default message:
+```c
+if (s_state_changed) {
+    // ... existing state change code ...
+
+    // Auto-show dialog for dialog states
+    const char *auto_msgs[] = {
+        [PW_STATE_ALERT]     = "Something needs your attention!",
+        [PW_STATE_GREETING]  = "Morning! Ready to get to work.",
+        [PW_STATE_REPORTING] = "Here's what happened.",
+    };
+    if (state == PW_STATE_ALERT || state == PW_STATE_GREETING || state == PW_STATE_REPORTING) {
+        if (!s_msg_pending) {
+            pw_dialog_show(auto_msgs[state], PW_MSG_LEVEL_INFO);
+        }
+    } else {
+        pw_dialog_hide();
+    }
+}
+```
+Note: `pw_dialog_show` and `pw_dialog_hide` must be called inside the `lvgl_port_lock` section.
+
+**Part B**: Shift sprite down when dialog is showing. In `prepare_frame()`, offset `s_next_screen_y` down when dialog is visible:
+```c
+// After calculating s_next_screen_y:
+if (pw_dialog_is_visible()) {
+    s_next_screen_y += 95;  // shift sprite down, dialog goes above
+}
+```
+
+**Part C** (optional, cosmetic): The speech tail triangle and grainy texture are in the dashboard's canvas drawing code. For the firmware's LVGL dialog, the current solid dark bg with border is fine — the grainy texture would require a custom LVGL draw callback which is complex. The speech tail could be approximated with an LVGL triangle object but is low priority.
+
+#### 6. Background Images (Deferred)
 
 **Dashboard has**: 84 Pictlogica FF backgrounds cycling per state
 **Firmware has**: solid colors only (bg tile loading disabled due to SPI conflict)
