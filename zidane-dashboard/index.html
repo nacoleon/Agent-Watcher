@@ -312,7 +312,7 @@
                 const boxW = 280;
                 const boxH = 56;
                 const boxX = (CANVAS_SIZE - boxW) / 2;
-                const boxY = CANVAS_SIZE - 120;
+                const boxY = drawY + drawH + 8;  // right below Zidane's feet
 
                 // FF9 grainy gray background
                 const r = 6;
@@ -362,6 +362,12 @@
                 ctx.lineWidth = 2;
                 ctx.stroke();
 
+                // Clip text to box bounds
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(boxX, boxY, boxW, boxH);
+                ctx.clip();
+
                 // "Zidane:" name label in green
                 ctx.font = 'bold 13px monospace';
                 ctx.fillStyle = '#7BE87B';
@@ -374,14 +380,15 @@
                     greeting: 'Morning! Ready to get to work.',
                     reporting: 'Here\'s what happened while you were away.',
                 };
-                // Use last_message if available, otherwise default
                 const msgText = lastKnownMessage || dialogMessages[currentState] || '';
                 ctx.font = '12px monospace';
                 ctx.fillStyle = '#FFFFFF';
-                ctx.fillText(msgText.substring(0, 40), boxX + 10, boxY + 36);
-                if (msgText.length > 40) {
-                    ctx.fillText(msgText.substring(40, 80), boxX + 10, boxY + 50);
+                ctx.fillText(msgText.substring(0, 38), boxX + 10, boxY + 34);
+                if (msgText.length > 38) {
+                    ctx.fillText(msgText.substring(38, 76), boxX + 10, boxY + 48);
                 }
+
+                ctx.restore();
             }
 
             frameTick++;
