@@ -40,7 +40,7 @@ static lv_img_dsc_t s_frame_dsc = {};
 
 // --- Background colors per agent state ---
 static const uint32_t STATE_BG_COLORS[] = {
-    [PW_STATE_IDLE]      = 0xFDE8C8,
+    [PW_STATE_IDLE]      = 0xFF0000,  // BRIGHT RED for testing
     [PW_STATE_WORKING]   = 0xE8F0E8,
     [PW_STATE_WAITING]   = 0xE8E0F0,
     [PW_STATE_ALERT]     = 0x402020,
@@ -368,12 +368,11 @@ static void update_frame(void)
     int screen_x = s_pos_x10 / 10 - scaled_w / 2;
     int screen_y = s_pos_y10 / 10 - scaled_h / 2 + bounce_y;
 
+    // Note: caller must hold lvgl_port_lock
     if (s_sprite_img) {
-        lvgl_port_lock(0);
         lv_img_cache_invalidate_src(&s_frame_dsc);
         lv_img_set_src(s_sprite_img, &s_frame_dsc);
         lv_obj_set_pos(s_sprite_img, screen_x, screen_y);
-        lvgl_port_unlock();
     }
 
     // Advance sprite frame — slow cycle (every 3 ticks at 10 FPS = 300ms per frame)
@@ -407,21 +406,35 @@ void pw_renderer_init(void)
 
     lvgl_port_lock(0);
 
-    s_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(s_screen, lv_color_hex(STATE_BG_COLORS[s_current_state]), 0);
-    lv_obj_set_style_bg_opa(s_screen, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(s_screen, PW_DISPLAY_WIDTH / 2, 0);
-    lv_obj_set_style_clip_corner(s_screen, true, 0);
+    // Log what LVGL's default screen looks like before we create ours
+    lv_obj_t *def_scr = lv_scr_act();
+    lv_color_t def_bg = lv_obj_get_style_bg_color(def_scr, 0);
+    lv_opa_t def_opa = lv_obj_get_style_bg_opa(def_scr, 0);
+    ESP_LOGI(TAG, "Default screen bg: color=0x%04X opa=%d", lv_color_to16(def_bg), def_opa);
 
-    // s_bg_img created on-demand when a background tile is loaded
-    // Don't create it here — empty lv_img renders as white covering bg color
+    // Instead of creating a new screen, use the active one directly
+    // This avoids potential theme/default screen conflicts
+    s_screen = lv_scr_act();
+
+    uint32_t bg_hex = STATE_BG_COLORS[s_current_state];
+    ESP_LOGI(TAG, "Setting bg color: 0x%06X for state %d", (unsigned int)bg_hex, s_current_state);
+
+    lv_obj_set_style_bg_color(s_screen, lv_color_hex(bg_hex), 0);
+    lv_obj_set_style_bg_opa(s_screen, LV_OPA_COVER, 0);
+
+    // Verify it was set
+    lv_color_t set_bg = lv_obj_get_style_bg_color(s_screen, 0);
+    lv_opa_t set_opa = lv_obj_get_style_bg_opa(s_screen, 0);
+    ESP_LOGI(TAG, "After set: bg color=0x%04X opa=%d", lv_color_to16(set_bg), set_opa);
+
+    // Remove all children from default screen (theme may have added some)
+    lv_obj_clean(s_screen);
 
     s_sprite_img = lv_img_create(s_screen);
-    lv_obj_remove_style_all(s_sprite_img);  // Strip default theme bg/border
-    // Start centered — position will be updated by behavior_tick
+    lv_obj_remove_style_all(s_sprite_img);
     lv_obj_set_pos(s_sprite_img, CENTER_X - SPRITE_HALF, CENTER_Y - SPRITE_HALF);
 
-    lv_scr_load(s_screen);
+    ESP_LOGI(TAG, "Screen children: %u", (unsigned)lv_obj_get_child_cnt(s_screen));
 
     lvgl_port_unlock();
 
@@ -524,38 +537,21 @@ static void renderer_task(void *arg)
     TickType_t frame_delay = pdMS_TO_TICKS(1000 / PW_ANIM_FPS);
 
     while (1) {
-        // --- Process pending state/message/wake (lock-free from other threads) ---
+        // --- Process pending wake (no LVGL lock needed) ---
         if (s_wake_requested) {
             s_wake_requested = false;
             display_wake();
         }
 
+        // --- Process pending state change (no LVGL lock needed for behavior) ---
         if (s_state_changed) {
             s_state_changed = false;
             s_current_state = s_pending_state;
-
-            // Update background color
-            lvgl_port_lock(0);
-            lv_obj_set_style_bg_opa(s_screen, LV_OPA_COVER, 0);
-            lv_obj_set_style_bg_color(s_screen, lv_color_hex(STATE_BG_COLORS[s_current_state]), 0);
-            lvgl_port_unlock();
-
-            // Reset behavior
             s_behav_state = BEHAV_IDLE;
             s_state_timer = 0;
             set_anim_by_name("idle", s_facing);
-
             ESP_LOGI(TAG, "State visual applied: %s", pw_agent_state_to_string(s_current_state));
         }
-
-        if (s_msg_pending) {
-            s_msg_pending = false;
-            lvgl_port_lock(0);
-            pw_dialog_show(s_pending_msg, s_pending_msg_level);
-            lvgl_port_unlock();
-        }
-
-        // --- Normal render cycle ---
 
         // Check display sleep timeout
         int64_t now_ms = esp_timer_get_time() / 1000;
@@ -563,11 +559,29 @@ static void renderer_task(void *arg)
             display_sleep();
         }
 
+        // --- Single LVGL lock for ALL display operations this frame ---
         if (!s_display_sleeping) {
-            update_frame();
-            // Tick dialog auto-dismiss
+            // update_frame does behavior + sprite extraction + LVGL updates
+            // It expects lvgl_port_lock to be held for the LVGL calls inside it
+            // Take lock ONCE for the entire frame
             lvgl_port_lock(0);
+
+            update_frame();
+
+            // Apply pending bg color change
+            if (s_screen) {
+                lv_obj_set_style_bg_color(s_screen, lv_color_hex(STATE_BG_COLORS[s_current_state]), 0);
+            }
+
+            // Apply pending message
+            if (s_msg_pending) {
+                s_msg_pending = false;
+                pw_dialog_show(s_pending_msg, s_pending_msg_level);
+            }
+
+            // Tick dialog auto-dismiss
             pw_dialog_tick();
+
             lvgl_port_unlock();
         }
 
