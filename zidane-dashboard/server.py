@@ -19,6 +19,7 @@ DASHBOARD_DIR = os.path.dirname(os.path.abspath(__file__))
 # Agent states (matching firmware)
 STATES = ["idle", "working", "waiting", "alert", "greeting", "sleeping", "reporting"]
 _state_idx = [0]
+_manual_state = [False]  # True when state was set manually (stops auto-cycling)
 
 mock_state = {
     "agent_state": "idle",
@@ -44,9 +45,10 @@ class ZidaneHandler(SimpleHTTPRequestHandler):
         path = parsed.path
 
         if path == '/api/status':
-            # Cycle state for demo
-            _state_idx[0] = (_state_idx[0] + 1) % (len(STATES) * 4)
-            mock_state["agent_state"] = STATES[_state_idx[0] // 4]
+            # Only auto-cycle if state hasn't been manually set
+            if not _manual_state[0]:
+                _state_idx[0] = (_state_idx[0] + 1) % (len(STATES) * 4)
+                mock_state["agent_state"] = STATES[_state_idx[0] // 4]
             mock_state["uptime_seconds"] = int(time.time() - _start_time)
             self._json_response(mock_state)
         elif path == '/api/timeline':
@@ -72,6 +74,7 @@ class ZidaneHandler(SimpleHTTPRequestHandler):
             state = data.get("state", "idle")
             if state in STATES:
                 mock_state["agent_state"] = state
+                _manual_state[0] = True
             self._json_response({"ok": True, "state": mock_state["agent_state"]})
         else:
             self.send_error(404)
