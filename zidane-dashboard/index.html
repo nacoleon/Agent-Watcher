@@ -134,15 +134,35 @@
             walkDir = DIR_VEC[facing];
         }
 
+        // States with dedicated animations (skip walk/idle behavior)
+        const FIXED_ANIM_STATES = {
+            sleeping: 'sleeping',
+            alert: 'alert',
+            reporting: 'reporting',
+            waiting: 'waiting',
+        };
+
         function behaviorTick() {
             const b = STATE_BEHAVIOR[currentState] || STATE_BEHAVIOR.idle;
             stateTimer++;
+
+            // Fixed-animation states: no wandering, just play the animation
+            if (FIXED_ANIM_STATES[currentState]) {
+                setAnim(FIXED_ANIM_STATES[currentState]);
+                return;
+            }
+
             switch (state) {
             case 'idle':
-                setAnim('idle_' + facing);
+                // Greeting uses its own anim but still moves
+                if (currentState === 'greeting') {
+                    setAnim('greeting');
+                } else {
+                    setAnim('idle_' + facing);
+                }
                 if (Math.random() < b.turnChance) {
                     facing = DIRS[Math.floor(Math.random() * 4)];
-                    setAnim('idle_' + facing);
+                    if (currentState !== 'greeting') setAnim('idle_' + facing);
                     state = 'pausing'; stateTimer = 0;
                 } else if (Math.random() < b.walkChance) {
                     pickWalkDir();
@@ -152,18 +172,26 @@
                 }
                 break;
             case 'walking':
-                setAnim('walk_' + facing);
+                if (currentState === 'greeting') {
+                    setAnim('greeting');
+                } else {
+                    setAnim('walk_' + facing);
+                }
                 posX += walkDir.x * b.speed;
                 posY += walkDir.y * b.speed;
                 clampPos();
                 walkStepsLeft--;
                 if (walkStepsLeft <= 0 || atBoundary()) {
                     state = 'pausing'; stateTimer = 0;
-                    setAnim('idle_' + facing);
+                    if (currentState !== 'greeting') setAnim('idle_' + facing);
                 }
                 break;
             case 'pausing':
-                setAnim('idle_' + facing);
+                if (currentState === 'greeting') {
+                    setAnim('greeting');
+                } else {
+                    setAnim('idle_' + facing);
+                }
                 const [pMin, pMax] = b.pauseTicks;
                 if (stateTimer > pMin + Math.random() * (pMax - pMin)) {
                     state = 'idle'; stateTimer = 0;
@@ -184,7 +212,8 @@
             if (!anim) return;
 
             const frame = anim.frames[animFrame];
-            const fw = framesData.frame_width;
+            // Per-frame width override (sleeping frames are 15px wide)
+            const fw = frame.w || framesData.frame_width;
             const fh = framesData.frame_height;
 
             const b = STATE_BEHAVIOR[currentState] || STATE_BEHAVIOR.idle;
@@ -204,12 +233,61 @@
             ctx.imageSmoothingEnabled = false;
             ctx.drawImage(spriteImg, frame.x, frame.y, fw, fh, drawX, drawY, drawW, drawH);
 
-            // ZZZ for sleeping
+            // --- Status bubbles and overlays ---
+
+            // ZZZ for sleeping — floating z's that drift upward
             if (currentState === 'sleeping') {
-                ctx.font = '24px serif';
-                ctx.fillStyle = 'rgba(255,255,255,0.4)';
-                const zzOffset = Math.sin(frameTick * 0.05) * 5;
-                ctx.fillText('z Z z', posX + 30, posY - 50 + zzOffset);
+                const t = frameTick * 0.04;
+                ctx.font = 'bold 16px monospace';
+                for (let i = 0; i < 3; i++) {
+                    const phase = t + i * 1.2;
+                    const drift = (phase % 3) * 20;
+                    const alpha = Math.max(0, 1 - (phase % 3) / 3);
+                    const size = 14 + i * 4;
+                    ctx.font = `bold ${size}px monospace`;
+                    ctx.fillStyle = `rgba(200,200,255,${alpha * 0.7})`;
+                    ctx.fillText('z', posX + 35 + i * 12, posY - 40 - drift + i * 5);
+                }
+            }
+
+            // "!" bubble for alert — red exclamation
+            if (currentState === 'alert') {
+                const bobY = Math.sin(frameTick * 0.15) * 3;
+                const bx = posX + 30, by = posY - 65 + bobY;
+                // Bubble background
+                ctx.fillStyle = '#AA5555';
+                ctx.beginPath();
+                ctx.arc(bx, by, 14, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#FF8888';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                // Exclamation mark
+                ctx.font = 'bold 18px monospace';
+                ctx.fillStyle = '#FFF';
+                ctx.textAlign = 'center';
+                ctx.fillText('!', bx, by + 6);
+                ctx.textAlign = 'left';
+            }
+
+            // "!" bubble for greeting — yellow/friendly
+            if (currentState === 'greeting') {
+                const bobY = Math.sin(frameTick * 0.2) * 4;
+                const bx = posX + 30, by = posY - 65 + bobY;
+                // Bubble background
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.arc(bx, by, 14, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#FFF0C0';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                // Exclamation mark
+                ctx.font = 'bold 18px monospace';
+                ctx.fillStyle = '#1a1a2e';
+                ctx.textAlign = 'center';
+                ctx.fillText('!', bx, by + 6);
+                ctx.textAlign = 'left';
             }
 
             frameTick++;
