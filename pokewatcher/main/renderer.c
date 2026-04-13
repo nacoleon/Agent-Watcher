@@ -4,6 +4,7 @@
 #include "mood_engine.h"
 #include "sensecap-watcher.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
 #include "freertos/FreeRTOS.h"
@@ -83,7 +84,12 @@ static facing_dir_t s_facing = DIR_DOWN;
 static behav_state_t s_behav_state = BEHAV_IDLE;
 static int s_state_timer = 0;
 static int s_walk_steps_left = 0;
+static int s_pause_target = 0;
 static int s_frame_tick = 0;
+
+// Display sleep
+static bool s_display_sleeping = false;
+static int64_t s_last_activity_ms = 0;
 
 // Display geometry
 #define CENTER_X   (PW_DISPLAY_WIDTH / 2)
@@ -92,14 +98,18 @@ static int s_frame_tick = 0;
 // Circular boundary: keep sprite center within this radius of display center
 #define MOVE_RADIUS (CENTER_X - SPRITE_HALF - 10)
 
+static uint32_t s_rand_state = 0;
+
 static uint32_t simple_rand(void)
 {
-    // xorshift32 — lightweight PRNG for behavior decisions
-    static uint32_t state = 12345;
-    state ^= state << 13;
-    state ^= state >> 17;
-    state ^= state << 5;
-    return state;
+    if (s_rand_state == 0) {
+        s_rand_state = (uint32_t)esp_timer_get_time();
+        if (s_rand_state == 0) s_rand_state = 12345;
+    }
+    s_rand_state ^= s_rand_state << 13;
+    s_rand_state ^= s_rand_state >> 17;
+    s_rand_state ^= s_rand_state << 5;
+    return s_rand_state;
 }
 
 static int rand_range(int min, int max)
@@ -177,6 +187,7 @@ static void behavior_tick(void)
             set_anim_by_name("idle", s_facing);
             s_behav_state = BEHAV_PAUSING;
             s_state_timer = 0;
+            s_pause_target = rand_range(b->pause_min, b->pause_max);
         } else if (rand_chance(b->walk_chance)) {
             pick_walk_dir();
             s_walk_steps_left = rand_range(b->walk_steps_min, b->walk_steps_max);
@@ -195,18 +206,38 @@ static void behavior_tick(void)
         if (s_walk_steps_left <= 0 || at_boundary()) {
             s_behav_state = BEHAV_PAUSING;
             s_state_timer = 0;
+            s_pause_target = rand_range(b->pause_min, b->pause_max);
             set_anim_by_name("idle", s_facing);
         }
         break;
 
     case BEHAV_PAUSING:
         set_anim_by_name("idle", s_facing);
-        if (s_state_timer > rand_range(b->pause_min, b->pause_max)) {
+        if (s_state_timer >= s_pause_target) {
             s_behav_state = BEHAV_IDLE;
             s_state_timer = 0;
         }
         break;
     }
+}
+
+static void display_sleep(void)
+{
+    if (!s_display_sleeping) {
+        s_display_sleeping = true;
+        bsp_lcd_brightness_set(0);
+        ESP_LOGI(TAG, "Display sleeping (idle timeout)");
+    }
+}
+
+static void display_wake(void)
+{
+    if (s_display_sleeping) {
+        s_display_sleeping = false;
+        bsp_lcd_brightness_set(80);
+        ESP_LOGI(TAG, "Display waking up");
+    }
+    s_last_activity_ms = esp_timer_get_time() / 1000;
 }
 
 static void update_frame(void)
@@ -306,6 +337,9 @@ void pw_renderer_init(void)
     // Seed PRNG with tick count for variety
     simple_rand();
 
+    // Start activity timer
+    s_last_activity_ms = esp_timer_get_time() / 1000;
+
     ESP_LOGI(TAG, "Renderer initialized (%dx%d display)", PW_DISPLAY_WIDTH, PW_DISPLAY_HEIGHT);
 }
 
@@ -313,6 +347,7 @@ bool pw_renderer_load_pokemon(const char *pokemon_id)
 {
     xSemaphoreTake(s_render_mutex, portMAX_DELAY);
 
+    display_wake();
     pw_sprite_free(&s_sprite);
 
     if (!pw_sprite_load(pokemon_id, &s_sprite)) {
@@ -341,18 +376,15 @@ void pw_renderer_set_mood(pw_mood_t mood)
 {
     xSemaphoreTake(s_render_mutex, portMAX_DELAY);
 
+    // Wake display on any mood change
+    display_wake();
+
     s_current_mood = mood;
 
     // Reset to idle in current facing direction
     s_behav_state = BEHAV_IDLE;
     s_state_timer = 0;
     set_anim_by_name("idle", s_facing);
-
-    lvgl_port_lock(0);
-    if (s_screen) {
-        lv_obj_set_style_bg_color(s_screen, lv_color_hex(MOOD_BG_COLORS[mood]), 0);
-    }
-    lvgl_port_unlock();
 
     xSemaphoreGive(s_render_mutex);
     ESP_LOGI(TAG, "Mood visual set to: %s", pw_mood_to_string(mood));
@@ -364,12 +396,6 @@ void pw_renderer_play_evolution(const char *new_pokemon_id)
 
     xSemaphoreTake(s_render_mutex, portMAX_DELAY);
 
-    lvgl_port_lock(0);
-    if (s_screen) {
-        lv_obj_set_style_bg_color(s_screen, lv_color_white(), 0);
-    }
-    lvgl_port_unlock();
-
     xSemaphoreGive(s_render_mutex);
 
     vTaskDelay(pdMS_TO_TICKS(1500));
@@ -379,13 +405,12 @@ void pw_renderer_play_evolution(const char *new_pokemon_id)
     // Re-center after evolution
     s_pos_x10 = CENTER_X * 10;
     s_pos_y10 = CENTER_Y * 10;
+}
 
+void pw_renderer_wake_display(void)
+{
     xSemaphoreTake(s_render_mutex, portMAX_DELAY);
-    lvgl_port_lock(0);
-    if (s_screen) {
-        lv_obj_set_style_bg_color(s_screen, lv_color_hex(MOOD_BG_COLORS[s_current_mood]), 0);
-    }
-    lvgl_port_unlock();
+    display_wake();
     xSemaphoreGive(s_render_mutex);
 }
 
@@ -397,9 +422,19 @@ static void renderer_task(void *arg)
 
     while (1) {
         xSemaphoreTake(s_render_mutex, portMAX_DELAY);
-        update_frame();
+
+        // Check display sleep timeout
+        int64_t now_ms = esp_timer_get_time() / 1000;
+        if (!s_display_sleeping && (now_ms - s_last_activity_ms) >= PW_DISPLAY_SLEEP_TIMEOUT_MS) {
+            display_sleep();
+        }
+
+        if (!s_display_sleeping) {
+            update_frame();
+        }
+
         xSemaphoreGive(s_render_mutex);
-        vTaskDelay(frame_delay);
+        vTaskDelay(s_display_sleeping ? pdMS_TO_TICKS(1000) : frame_delay);
     }
 }
 
