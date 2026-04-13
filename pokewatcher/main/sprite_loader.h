@@ -35,6 +35,7 @@ typedef struct {
 bool pw_sprite_load(const char *pokemon_id, pw_sprite_data_t *sprite);
 void pw_sprite_free(pw_sprite_data_t *sprite);
 const pw_animation_t *pw_sprite_get_mood_anim(const pw_sprite_data_t *sprite, pw_mood_t mood);
-uint16_t *pw_sprite_extract_frame_scaled(const pw_sprite_data_t *sprite, const pw_frame_coord_t *coord, uint16_t scale);
+const pw_animation_t *pw_sprite_get_anim_by_name(const pw_sprite_data_t *sprite, const char *name);
+uint8_t *pw_sprite_extract_frame_scaled(const pw_sprite_data_t *sprite, const pw_frame_coord_t *coord, uint16_t scale);
 
 #endif

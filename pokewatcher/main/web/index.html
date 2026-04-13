@@ -51,9 +51,9 @@
         let animTimer = null;
 
         // Canvas is 400x400 to match the real 412x412 watch display
-        // Sprite drawn at 8x scale (32*8=256px) — fills most of the screen
+        // Sprite drawn at 4x scale (32*4=128px) — matches device renderer
         const CANVAS_SIZE = 400;
-        const DRAW_SCALE = 8;
+        const DRAW_SCALE = 4;
         const SPRITE_HALF = 16 * DRAW_SCALE;
         const POS_MIN = SPRITE_HALF + 10;
         const POS_MAX = CANVAS_SIZE - SPRITE_HALF - 10;

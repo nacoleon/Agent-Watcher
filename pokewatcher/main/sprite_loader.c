@@ -159,17 +159,28 @@ const pw_animation_t *pw_sprite_get_mood_anim(const pw_sprite_data_t *sprite, pw
     return NULL;
 }
 
-uint16_t *pw_sprite_extract_frame_scaled(const pw_sprite_data_t *sprite,
-                                          const pw_frame_coord_t *coord,
-                                          uint16_t scale)
+const pw_animation_t *pw_sprite_get_anim_by_name(const pw_sprite_data_t *sprite, const char *name)
+{
+    if (!name || name[0] == '\0') return NULL;
+    for (int i = 0; i < sprite->animation_count; i++) {
+        if (strcmp(sprite->animations[i].name, name) == 0) {
+            return &sprite->animations[i];
+        }
+    }
+    return NULL;
+}
+
+uint8_t *pw_sprite_extract_frame_scaled(const pw_sprite_data_t *sprite,
+                                         const pw_frame_coord_t *coord,
+                                         uint16_t scale)
 {
     if (!sprite->sprite_sheet_data) return NULL;
 
     uint16_t dst_w = sprite->frame_width * scale;
     uint16_t dst_h = sprite->frame_height * scale;
-    size_t buf_size = dst_w * dst_h * sizeof(uint16_t);
+    size_t buf_size = dst_w * dst_h * 3;  // 3 bytes per pixel
 
-    uint16_t *buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+    uint8_t *buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
     if (!buf) return NULL;
 
     const uint16_t *sheet = (const uint16_t *)sprite->sprite_sheet_data;
@@ -181,7 +192,20 @@ uint16_t *pw_sprite_extract_frame_scaled(const pw_sprite_data_t *sprite,
             uint16_t sx = coord->x + (dx / scale);
             if (sx >= sprite->sheet_width) sx = sprite->sheet_width - 1;
             uint16_t px = sheet[sy * sprite->sheet_width + sx];
-            buf[dy * dst_w + dx] = (px >> 8) | (px << 8);  // Byte-swap for LV_COLOR_16_SWAP
+            size_t idx = (dy * dst_w + dx) * 3;
+
+            if (px == 0xF81F) {
+                // Magenta = transparent
+                buf[idx]     = 0;
+                buf[idx + 1] = 0;
+                buf[idx + 2] = 0x00;  // alpha = transparent
+            } else {
+                // Byte-swap for LV_COLOR_16_SWAP, then store as little-endian
+                uint16_t swapped = (px >> 8) | (px << 8);
+                buf[idx]     = swapped & 0xFF;
+                buf[idx + 1] = swapped >> 8;
+                buf[idx + 2] = 0xFF;  // alpha = opaque
+            }
         }
     }
 

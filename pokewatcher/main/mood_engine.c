@@ -71,8 +71,8 @@ void pw_mood_engine_init(void)
     int64_t now = now_ms();
 
     s_state = (pw_mood_state_t){
-        .current_mood = PW_MOOD_SLEEPY,
-        .previous_mood = PW_MOOD_SLEEPY,
+        .current_mood = PW_MOOD_EXCITED,   // TEMP: testing behavior
+        .previous_mood = PW_MOOD_EXCITED,
         .mood_entered_at_ms = now,
         .last_person_seen_ms = 0,
         .person_present = false,
