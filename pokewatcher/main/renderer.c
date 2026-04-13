@@ -328,11 +328,16 @@ static void display_wake(void)
     s_last_activity_ms = esp_timer_get_time() / 1000;
 }
 
-static void update_frame(void)
-{
-    if (!s_current_anim || s_current_anim->frame_count == 0) return;
+// Cached values from prepare_frame for use in commit_frame
+static int s_next_screen_x = 0;
+static int s_next_screen_y = 0;
+static bool s_frame_ready = false;
 
-    // Run behavior state machine
+// Phase 1: CPU work — behavior, sprite extraction, position calc. NO LVGL calls.
+static void prepare_frame(void)
+{
+    if (!s_current_anim || s_current_anim->frame_count == 0) { s_frame_ready = false; return; }
+
     behavior_tick();
 
     const pw_frame_coord_t *coord = &s_current_anim->frames[s_current_frame];
@@ -343,9 +348,8 @@ static void update_frame(void)
     }
 
     s_frame_buf = pw_sprite_extract_frame_scaled(&s_sprite, coord, PW_SPRITE_SCALE);
-    if (!s_frame_buf) return;
+    if (!s_frame_buf) { s_frame_ready = false; return; }
 
-    // Use actual sprite dimensions, not hardcoded PW_SPRITE_DST_SIZE
     uint16_t scaled_w = s_sprite.frame_width * PW_SPRITE_SCALE;
     uint16_t scaled_h = s_sprite.frame_height * PW_SPRITE_SCALE;
 
@@ -357,36 +361,30 @@ static void update_frame(void)
     s_frame_dsc.data_size = scaled_w * scaled_h * 3;
     s_frame_dsc.data = (const uint8_t *)s_frame_buf;
 
-    // Bounce effect
     const mood_behavior_t *b = &STATE_BEHAVIORS[s_current_state];
-    int bounce_y = 0;
-    if (b->bounce_amp > 0) {
-        bounce_y = (int)(sinf(s_frame_tick * 0.3f) * b->bounce_amp);
-    }
+    int bounce_y = (b->bounce_amp > 0) ? (int)(sinf(s_frame_tick * 0.3f) * b->bounce_amp) : 0;
 
-    // Position sprite on screen (use actual scaled dimensions)
-    int screen_x = s_pos_x10 / 10 - scaled_w / 2;
-    int screen_y = s_pos_y10 / 10 - scaled_h / 2 + bounce_y;
+    s_next_screen_x = s_pos_x10 / 10 - scaled_w / 2;
+    s_next_screen_y = s_pos_y10 / 10 - scaled_h / 2 + bounce_y;
+    s_frame_ready = true;
 
-    // Note: caller must hold lvgl_port_lock
-    if (s_sprite_img) {
-        lv_img_cache_invalidate_src(&s_frame_dsc);
-        lv_img_set_src(s_sprite_img, &s_frame_dsc);
-        lv_obj_set_pos(s_sprite_img, screen_x, screen_y);
-    }
-
-    // Advance sprite frame — slow cycle (every 3 ticks at 10 FPS = 300ms per frame)
+    // Advance sprite frame
     s_frame_tick++;
     if (s_frame_tick % 3 == 0) {
         s_current_frame++;
         if (s_current_frame >= s_current_anim->frame_count) {
-            if (s_current_anim->loop) {
-                s_current_frame = 0;
-            } else {
-                s_current_frame = s_current_anim->frame_count - 1;
-            }
+            s_current_frame = s_current_anim->loop ? 0 : s_current_anim->frame_count - 1;
         }
     }
+}
+
+// Phase 2: LVGL widget updates only. Caller MUST hold lvgl_port_lock.
+static void commit_frame(void)
+{
+    if (!s_frame_ready || !s_sprite_img) return;
+    lv_img_cache_invalidate_src(&s_frame_dsc);
+    lv_img_set_src(s_sprite_img, &s_frame_dsc);
+    lv_obj_set_pos(s_sprite_img, s_next_screen_x, s_next_screen_y);
 }
 
 void pw_renderer_init(void)
@@ -478,7 +476,7 @@ bool pw_renderer_load_character(const char *character_id)
     s_current_frame = 0;
     s_behav_state = BEHAV_IDLE;
     s_state_timer = 0;
-    update_frame();
+    // First frame will be rendered by the render loop
 
     // Check for background tiles directory (try loading tile 01 as a test)
     char bg_test[300];
@@ -561,12 +559,13 @@ static void renderer_task(void *arg)
 
         // --- Single LVGL lock for ALL display operations this frame ---
         if (!s_display_sleeping) {
-            // update_frame does behavior + sprite extraction + LVGL updates
-            // It expects lvgl_port_lock to be held for the LVGL calls inside it
-            // Take lock ONCE for the entire frame
+            // Phase 1: CPU work outside LVGL lock (behavior, sprite extraction)
+            prepare_frame();
+
+            // Phase 2: single LVGL lock for ALL widget updates
             lvgl_port_lock(0);
 
-            update_frame();
+            commit_frame();
 
             // Apply pending bg color change
             if (s_screen) {
