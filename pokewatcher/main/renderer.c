@@ -334,8 +334,16 @@ static int s_next_screen_y = 0;
 static bool s_frame_ready = false;
 
 // Phase 1: CPU work — behavior, sprite extraction, position calc. NO LVGL calls.
+static int s_prepare_call_count = 0;
 static void prepare_frame(void)
 {
+    s_prepare_call_count++;
+    if (s_prepare_call_count <= 3) {
+        ESP_LOGI(TAG, "prepare_frame #%d: anim=%p frames=%d sprite_data=%p",
+            s_prepare_call_count, s_current_anim,
+            s_current_anim ? s_current_anim->frame_count : -1,
+            s_sprite.sprite_sheet_data);
+    }
     if (!s_current_anim || s_current_anim->frame_count == 0) { s_frame_ready = false; return; }
 
     behavior_tick();
@@ -379,8 +387,16 @@ static void prepare_frame(void)
 }
 
 // Phase 2: LVGL widget updates only. Caller MUST hold lvgl_port_lock.
+static int s_commit_call_count = 0;
 static void commit_frame(void)
 {
+    s_commit_call_count++;
+    if (s_commit_call_count <= 3) {
+        ESP_LOGI(TAG, "commit_frame #%d: ready=%d sprite_img=%p frame_buf=%p pos=(%d,%d) w=%d h=%d",
+            s_commit_call_count, s_frame_ready, s_sprite_img, s_frame_buf,
+            s_next_screen_x, s_next_screen_y,
+            s_frame_dsc.header.w, s_frame_dsc.header.h);
+    }
     if (!s_frame_ready || !s_sprite_img) return;
     lv_img_cache_invalidate_src(&s_frame_dsc);
     lv_img_set_src(s_sprite_img, &s_frame_dsc);
@@ -542,12 +558,14 @@ static void renderer_task(void *arg)
         }
 
         // --- Process pending state change (no LVGL lock needed for behavior) ---
+        static bool s_bg_color_dirty = false;
         if (s_state_changed) {
             s_state_changed = false;
             s_current_state = s_pending_state;
             s_behav_state = BEHAV_IDLE;
             s_state_timer = 0;
             set_anim_by_name("idle", s_facing);
+            s_bg_color_dirty = true;
             ESP_LOGI(TAG, "State visual applied: %s", pw_agent_state_to_string(s_current_state));
         }
 
@@ -567,8 +585,9 @@ static void renderer_task(void *arg)
 
             commit_frame();
 
-            // Apply pending bg color change
-            if (s_screen) {
+            // Apply pending bg color change (only when state changed)
+            if (s_bg_color_dirty && s_screen) {
+                s_bg_color_dirty = false;
                 lv_obj_set_style_bg_color(s_screen, lv_color_hex(STATE_BG_COLORS[s_current_state]), 0);
             }
 
