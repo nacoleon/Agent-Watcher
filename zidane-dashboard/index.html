@@ -397,7 +397,7 @@
                 ctx.beginPath();
                 ctx.moveTo(tailX, clampedBoxY + boxH);
                 ctx.lineTo(tailX + tailW, clampedBoxY + boxH);
-                ctx.lineTo(tailX + tailW - 2, clampedBoxY + boxH + tailH);
+                ctx.lineTo(tailX + 2, clampedBoxY + boxH + tailH);
                 ctx.closePath();
                 ctx.fill();
                 // Add dots to triangle to match texture
@@ -415,7 +415,7 @@
                 ctx.lineWidth = 2;
                 ctx.beginPath();
                 ctx.moveTo(tailX, clampedBoxY + boxH);
-                ctx.lineTo(tailX + tailW - 2, clampedBoxY + boxH + tailH);
+                ctx.lineTo(tailX + 2, clampedBoxY + boxH + tailH);
                 ctx.lineTo(tailX + tailW, clampedBoxY + boxH);
                 ctx.stroke();
 
