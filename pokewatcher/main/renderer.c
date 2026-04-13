@@ -1,7 +1,8 @@
 #include "renderer.h"
 #include "config.h"
 #include "sprite_loader.h"
-#include "mood_engine.h"
+#include "agent_state.h"
+#include "dialog.h"
 #include "sensecap-watcher.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -21,20 +22,21 @@ static lv_obj_t *s_screen = NULL;
 static lv_obj_t *s_sprite_img = NULL;
 
 static pw_sprite_data_t s_sprite = {};
-static pw_mood_t s_current_mood = PW_MOOD_EXCITED;  // TEMP: match mood_engine for testing
+static pw_agent_state_t s_current_state = PW_STATE_IDLE;
 static const pw_animation_t *s_current_anim = NULL;
 static int s_current_frame = 0;
 static uint8_t *s_frame_buf = NULL;
 static lv_img_dsc_t s_frame_dsc = {};
 
-// --- Background colors per mood ---
-static const uint32_t MOOD_BG_COLORS[] = {
-    [PW_MOOD_EXCITED]   = 0xFDE8C8,
-    [PW_MOOD_HAPPY]     = 0xFDE8C8,
-    [PW_MOOD_CURIOUS]   = 0xE8F0E8,
-    [PW_MOOD_LONELY]    = 0xC8D8F0,
-    [PW_MOOD_SLEEPY]    = 0x404060,
-    [PW_MOOD_OVERJOYED] = 0xFFF0C0,
+// --- Background colors per agent state ---
+static const uint32_t STATE_BG_COLORS[] = {
+    [PW_STATE_IDLE]      = 0xFDE8C8,
+    [PW_STATE_WORKING]   = 0xE8F0E8,
+    [PW_STATE_WAITING]   = 0xE8E0F0,
+    [PW_STATE_ALERT]     = 0x402020,
+    [PW_STATE_GREETING]  = 0xFFF0C0,
+    [PW_STATE_SLEEPING]  = 0x404060,
+    [PW_STATE_REPORTING] = 0xFDE8C8,
 };
 
 // --- Behavior state machine (matches web UI) ---
@@ -67,14 +69,15 @@ typedef struct {
     uint8_t  pause_max;
 } mood_behavior_t;
 
-// Matches the JS MOOD_BEHAVIOR table — chances scaled to per-1000
-static const mood_behavior_t MOOD_BEHAVIORS[] = {
-    [PW_MOOD_EXCITED]   = { .walk_chance = 60, .turn_chance = 40, .walk_steps_min = 8,  .walk_steps_max = 20, .speed_x10 = 25, .bounce_amp = 3, .pause_min = 10,  .pause_max = 30  },
-    [PW_MOOD_HAPPY]     = { .walk_chance = 30, .turn_chance = 20, .walk_steps_min = 6,  .walk_steps_max = 14, .speed_x10 = 15, .bounce_amp = 0, .pause_min = 30,  .pause_max = 80  },
-    [PW_MOOD_CURIOUS]   = { .walk_chance = 20, .turn_chance = 60, .walk_steps_min = 4,  .walk_steps_max = 10, .speed_x10 = 10, .bounce_amp = 0, .pause_min = 20,  .pause_max = 50  },
-    [PW_MOOD_LONELY]    = { .walk_chance = 10, .turn_chance = 10, .walk_steps_min = 3,  .walk_steps_max = 8,  .speed_x10 = 8,  .bounce_amp = 0, .pause_min = 60,  .pause_max = 150 },
-    [PW_MOOD_SLEEPY]    = { .walk_chance = 3,  .turn_chance = 5,  .walk_steps_min = 2,  .walk_steps_max = 5,  .speed_x10 = 5,  .bounce_amp = 0, .pause_min = 100, .pause_max = 250 },
-    [PW_MOOD_OVERJOYED] = { .walk_chance = 80, .turn_chance = 50, .walk_steps_min = 10, .walk_steps_max = 25, .speed_x10 = 30, .bounce_amp = 4, .pause_min = 5,   .pause_max = 15  },
+// Agent state behavior parameters
+static const mood_behavior_t STATE_BEHAVIORS[] = {
+    [PW_STATE_IDLE]      = { .walk_chance = 30, .turn_chance = 20, .walk_steps_min = 6,  .walk_steps_max = 14, .speed_x10 = 15, .bounce_amp = 0, .pause_min = 30,  .pause_max = 80  },
+    [PW_STATE_WORKING]   = { .walk_chance = 50, .turn_chance = 30, .walk_steps_min = 8,  .walk_steps_max = 16, .speed_x10 = 15, .bounce_amp = 0, .pause_min = 20,  .pause_max = 50  },
+    [PW_STATE_WAITING]   = { .walk_chance = 5,  .turn_chance = 15, .walk_steps_min = 2,  .walk_steps_max = 5,  .speed_x10 = 8,  .bounce_amp = 0, .pause_min = 80,  .pause_max = 200 },
+    [PW_STATE_ALERT]     = { .walk_chance = 80, .turn_chance = 50, .walk_steps_min = 10, .walk_steps_max = 25, .speed_x10 = 30, .bounce_amp = 4, .pause_min = 5,   .pause_max = 15  },
+    [PW_STATE_GREETING]  = { .walk_chance = 60, .turn_chance = 40, .walk_steps_min = 8,  .walk_steps_max = 20, .speed_x10 = 25, .bounce_amp = 3, .pause_min = 10,  .pause_max = 30  },
+    [PW_STATE_SLEEPING]  = { .walk_chance = 3,  .turn_chance = 5,  .walk_steps_min = 2,  .walk_steps_max = 5,  .speed_x10 = 5,  .bounce_amp = 0, .pause_min = 100, .pause_max = 250 },
+    [PW_STATE_REPORTING] = { .walk_chance = 10, .turn_chance = 10, .walk_steps_min = 3,  .walk_steps_max = 6,  .speed_x10 = 10, .bounce_amp = 0, .pause_min = 50,  .pause_max = 100 },
 };
 
 // Position in display pixels (fixed-point x10 for sub-pixel movement)
@@ -176,7 +179,7 @@ static void pick_walk_dir(void)
 
 static void behavior_tick(void)
 {
-    const mood_behavior_t *b = &MOOD_BEHAVIORS[s_current_mood];
+    const mood_behavior_t *b = &STATE_BEHAVIORS[s_current_state];
     s_state_timer++;
 
     switch (s_behav_state) {
@@ -265,8 +268,8 @@ static void update_frame(void)
     s_frame_dsc.data_size = PW_SPRITE_DST_SIZE * PW_SPRITE_DST_SIZE * 3;
     s_frame_dsc.data = (const uint8_t *)s_frame_buf;
 
-    // Bounce effect for excited/overjoyed
-    const mood_behavior_t *b = &MOOD_BEHAVIORS[s_current_mood];
+    // Bounce effect
+    const mood_behavior_t *b = &STATE_BEHAVIORS[s_current_state];
     int bounce_y = 0;
     if (b->bounce_amp > 0) {
         bounce_y = (int)(sinf(s_frame_tick * 0.3f) * b->bounce_amp);
@@ -316,7 +319,7 @@ void pw_renderer_init(void)
     lvgl_port_lock(0);
 
     s_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(s_screen, lv_color_hex(MOOD_BG_COLORS[s_current_mood]), 0);
+    lv_obj_set_style_bg_color(s_screen, lv_color_hex(STATE_BG_COLORS[s_current_state]), 0);
     lv_obj_set_style_bg_opa(s_screen, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(s_screen, PW_DISPLAY_WIDTH / 2, 0);
     lv_obj_set_style_clip_corner(s_screen, true, 0);
@@ -340,27 +343,32 @@ void pw_renderer_init(void)
     // Start activity timer
     s_last_activity_ms = esp_timer_get_time() / 1000;
 
+    // Initialize FF9 dialog box overlay
+    lvgl_port_lock(0);
+    pw_dialog_init(s_screen);
+    lvgl_port_unlock();
+
     ESP_LOGI(TAG, "Renderer initialized (%dx%d display)", PW_DISPLAY_WIDTH, PW_DISPLAY_HEIGHT);
 }
 
-bool pw_renderer_load_pokemon(const char *pokemon_id)
+bool pw_renderer_load_character(const char *character_id)
 {
     xSemaphoreTake(s_render_mutex, portMAX_DELAY);
 
     display_wake();
     pw_sprite_free(&s_sprite);
 
-    if (!pw_sprite_load(pokemon_id, &s_sprite)) {
-        ESP_LOGE(TAG, "Failed to load sprites for %s", pokemon_id);
+    if (!pw_sprite_load(character_id, &s_sprite)) {
+        ESP_LOGE(TAG, "Failed to load sprites for %s", character_id);
         xSemaphoreGive(s_render_mutex);
         return false;
     }
 
-    // Start with idle_down, falling back to mood anim
+    // Start with idle_down, falling back to state anim
     s_facing = DIR_DOWN;
     s_current_anim = pw_sprite_get_anim_by_name(&s_sprite, "idle_down");
     if (!s_current_anim) {
-        s_current_anim = pw_sprite_get_mood_anim(&s_sprite, s_current_mood);
+        s_current_anim = pw_sprite_get_state_anim(&s_sprite, s_current_state);
     }
     s_current_frame = 0;
     s_behav_state = BEHAV_IDLE;
@@ -368,43 +376,40 @@ bool pw_renderer_load_pokemon(const char *pokemon_id)
     update_frame();
 
     xSemaphoreGive(s_render_mutex);
-    ESP_LOGI(TAG, "Loaded Pokemon: %s", pokemon_id);
+    ESP_LOGI(TAG, "Loaded character: %s", character_id);
     return true;
 }
 
-void pw_renderer_set_mood(pw_mood_t mood)
+void pw_renderer_set_state(pw_agent_state_t state)
 {
     xSemaphoreTake(s_render_mutex, portMAX_DELAY);
 
-    // Wake display on any mood change
     display_wake();
+    s_current_state = state;
 
-    s_current_mood = mood;
+    // Update background color
+    if (s_screen) {
+        lvgl_port_lock(0);
+        lv_obj_set_style_bg_color(s_screen, lv_color_hex(STATE_BG_COLORS[state]), 0);
+        lvgl_port_unlock();
+    }
 
-    // Reset to idle in current facing direction
+    // Reset to idle behavior
     s_behav_state = BEHAV_IDLE;
     s_state_timer = 0;
     set_anim_by_name("idle", s_facing);
 
     xSemaphoreGive(s_render_mutex);
-    ESP_LOGI(TAG, "Mood visual set to: %s", pw_mood_to_string(mood));
+    ESP_LOGI(TAG, "State visual set to: %s", pw_agent_state_to_string(state));
 }
 
-void pw_renderer_play_evolution(const char *new_pokemon_id)
+void pw_renderer_show_message(const char *text, pw_msg_level_t level)
 {
-    ESP_LOGI(TAG, "Playing evolution animation...");
-
     xSemaphoreTake(s_render_mutex, portMAX_DELAY);
-
+    lvgl_port_lock(0);
+    pw_dialog_show(text, level);
+    lvgl_port_unlock();
     xSemaphoreGive(s_render_mutex);
-
-    vTaskDelay(pdMS_TO_TICKS(1500));
-
-    pw_renderer_load_pokemon(new_pokemon_id);
-
-    // Re-center after evolution
-    s_pos_x10 = CENTER_X * 10;
-    s_pos_y10 = CENTER_Y * 10;
 }
 
 void pw_renderer_wake_display(void)
@@ -431,6 +436,10 @@ static void renderer_task(void *arg)
 
         if (!s_display_sleeping) {
             update_frame();
+            // Tick dialog auto-dismiss
+            lvgl_port_lock(0);
+            pw_dialog_tick();
+            lvgl_port_unlock();
         }
 
         xSemaphoreGive(s_render_mutex);
