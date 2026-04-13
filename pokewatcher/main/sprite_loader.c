@@ -76,12 +76,12 @@ static bool load_frame_manifest(const char *pokemon_id, pw_sprite_data_t *sprite
 
     static const char *state_anim_map[] = {
         [PW_STATE_IDLE]      = "idle_down",
-        [PW_STATE_WORKING]   = "walk_down",
-        [PW_STATE_WAITING]   = "idle_down",
-        [PW_STATE_ALERT]     = "walk_down",
+        [PW_STATE_WORKING]   = "working",
+        [PW_STATE_WAITING]   = "waiting",
+        [PW_STATE_ALERT]     = "alert",
         [PW_STATE_GREETING]  = "greeting",
         [PW_STATE_SLEEPING]  = "sleeping",
-        [PW_STATE_REPORTING] = "idle_down",
+        [PW_STATE_REPORTING] = "reporting",
     };
     for (int i = 0; i < PW_STATE_COUNT; i++) {
         strncpy(sprite->state_anim_names[i], state_anim_map[i], PW_ANIM_NAME_LEN - 1);
