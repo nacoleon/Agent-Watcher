@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zidane Watcher</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="header">
+        <h1>Zidane</h1>
+        <span class="subtitle">OpenClaw Desk Companion</span>
+    </div>
+    <main>
+        <div class="sprite-display">
+            <div class="watch-bezel">
+                <div class="watch-screen" id="watch-screen">
+                    <canvas id="sprite-canvas" width="400" height="400"></canvas>
+                    <div class="dialog-overlay" id="dialog-overlay">
+                        <div class="name">Zidane:</div>
+                        <div class="text" id="dialog-text"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div style="text-align:center">
+            <div class="state-badge" id="state-badge">idle</div>
+        </div>
+        <div class="status-card">
+            <div class="stat">
+                <span class="label">Person</span>
+                <span id="person-status">--</span>
+            </div>
+            <div class="stat">
+                <span class="label">Uptime</span>
+                <span id="uptime">--</span>
+            </div>
+            <div class="stat">
+                <span class="label">WiFi RSSI</span>
+                <span id="rssi">--</span>
+            </div>
+            <div class="stat">
+                <span class="label">Last Msg</span>
+                <span id="last-msg">--</span>
+            </div>
+        </div>
+
+        <h2>State Control</h2>
+        <div class="state-controls" id="state-controls"></div>
+
+        <h2>Send Message</h2>
+        <div class="message-input">
+            <input type="text" id="msg-input" placeholder="Type a message..." maxlength="80">
+            <button onclick="sendMessage()">Send</button>
+        </div>
+
+        <h2>Timeline</h2>
+        <div id="timeline"></div>
+    </main>
+    <script>
+        let spriteImg = null;
+        let framesData = null;
+        let currentState = 'idle';
+
+        // Animation state
+        let animFrame = 0;
+        let animName = 'idle_down';
+        let animTimer = null;
+
+        const CANVAS_SIZE = 400;
+        const DRAW_SCALE = 7;  // FFRK sprites are 16x24, scale up to ~112x168
+        const SPRITE_HALF = 8 * DRAW_SCALE;
+        const CENTER = CANVAS_SIZE / 2;
+        const MOVE_RADIUS = CENTER - SPRITE_HALF - 15;
+
+        let posX = CENTER, posY = CENTER;
+        let facing = 'down';
+        let state = 'idle';
+        let stateTimer = 0;
+        let walkDir = { x: 0, y: 0 };
+        let walkStepsLeft = 0;
+
+        // Agent state behaviors (matching firmware)
+        const STATE_BEHAVIOR = {
+            idle:      { walkChance: 0.03, turnChance: 0.02, walkSteps: [6,14],  speed: 1.5, bounceAmp: 0, pauseTicks: [30,80],  bgColor: '#FDE8C8' },
+            working:   { walkChance: 0.05, turnChance: 0.03, walkSteps: [8,16],  speed: 1.5, bounceAmp: 0, pauseTicks: [20,50],  bgColor: '#E8F0E8' },
+            waiting:   { walkChance: 0.005,turnChance: 0.015,walkSteps: [2,5],   speed: 0.8, bounceAmp: 0, pauseTicks: [80,200], bgColor: '#E8E0F0' },
+            alert:     { walkChance: 0.08, turnChance: 0.05, walkSteps: [10,25], speed: 3.0, bounceAmp: 4, pauseTicks: [5,15],   bgColor: '#402020' },
+            greeting:  { walkChance: 0.06, turnChance: 0.04, walkSteps: [8,20],  speed: 2.5, bounceAmp: 3, pauseTicks: [10,30],  bgColor: '#FFF0C0' },
+            sleeping:  { walkChance: 0.003,turnChance: 0.005,walkSteps: [2,5],   speed: 0.5, bounceAmp: 0, pauseTicks: [100,250],bgColor: '#404060' },
+            reporting: { walkChance: 0.01, turnChance: 0.01, walkSteps: [3,6],   speed: 1.0, bounceAmp: 0, pauseTicks: [50,100], bgColor: '#FDE8C8' },
+        };
+
+        const DIRS = ['down', 'up', 'left', 'right'];
+        const DIR_VEC = { down: {x:0,y:1}, up: {x:0,y:-1}, left: {x:-1,y:0}, right: {x:1,y:0} };
+
+        function getAnim(name) {
+            return framesData && framesData.animations && framesData.animations[name];
+        }
+        function setAnim(name) {
+            if (animName === name) return;
+            animName = name;
+            animFrame = 0;
+        }
+
+        function clampPos() {
+            // Circular boundary
+            const dx = posX - CENTER;
+            const dy = posY - CENTER;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > MOVE_RADIUS) {
+                const scale = MOVE_RADIUS / dist;
+                posX = CENTER + dx * scale;
+                posY = CENTER + dy * scale;
+            }
+        }
+
+        function atBoundary() {
+            const dx = posX - CENTER;
+            const dy = posY - CENTER;
+            return Math.sqrt(dx * dx + dy * dy) >= MOVE_RADIUS - 5;
+        }
+
+        function pickWalkDir() {
+            const toCenter = { x: CENTER - posX, y: CENTER - posY };
+            const dist = Math.sqrt(toCenter.x * toCenter.x + toCenter.y * toCenter.y);
+            if (dist > 40 && Math.random() < 0.6) {
+                facing = Math.abs(toCenter.x) > Math.abs(toCenter.y)
+                    ? (toCenter.x > 0 ? 'right' : 'left')
+                    : (toCenter.y > 0 ? 'down' : 'up');
+            } else {
+                facing = DIRS[Math.floor(Math.random() * 4)];
+            }
+            walkDir = DIR_VEC[facing];
+        }
+
+        function behaviorTick() {
+            const b = STATE_BEHAVIOR[currentState] || STATE_BEHAVIOR.idle;
+            stateTimer++;
+            switch (state) {
+            case 'idle':
+                setAnim('idle_' + facing);
+                if (Math.random() < b.turnChance) {
+                    facing = DIRS[Math.floor(Math.random() * 4)];
+                    setAnim('idle_' + facing);
+                    state = 'pausing'; stateTimer = 0;
+                } else if (Math.random() < b.walkChance) {
+                    pickWalkDir();
+                    const [min, max] = b.walkSteps;
+                    walkStepsLeft = min + Math.floor(Math.random() * (max - min));
+                    state = 'walking'; stateTimer = 0;
+                }
+                break;
+            case 'walking':
+                setAnim('walk_' + facing);
+                posX += walkDir.x * b.speed;
+                posY += walkDir.y * b.speed;
+                clampPos();
+                walkStepsLeft--;
+                if (walkStepsLeft <= 0 || atBoundary()) {
+                    state = 'pausing'; stateTimer = 0;
+                    setAnim('idle_' + facing);
+                }
+                break;
+            case 'pausing':
+                setAnim('idle_' + facing);
+                const [pMin, pMax] = b.pauseTicks;
+                if (stateTimer > pMin + Math.random() * (pMax - pMin)) {
+                    state = 'idle'; stateTimer = 0;
+                }
+                break;
+            }
+        }
+
+        let frameTick = 0;
+        function drawFrame() {
+            if (!spriteImg || !framesData) return;
+            behaviorTick();
+            clampPos();
+
+            const canvas = document.getElementById('sprite-canvas');
+            const ctx = canvas.getContext('2d');
+            const anim = getAnim(animName);
+            if (!anim) return;
+
+            const frame = anim.frames[animFrame];
+            const fw = framesData.frame_width;
+            const fh = framesData.frame_height;
+
+            const b = STATE_BEHAVIOR[currentState] || STATE_BEHAVIOR.idle;
+
+            // Fill background with state color
+            ctx.fillStyle = b.bgColor;
+            ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+            // Bounce
+            const bounceY = b.bounceAmp > 0 ? Math.sin(frameTick * 0.3) * b.bounceAmp : 0;
+
+            const drawW = fw * DRAW_SCALE;
+            const drawH = fh * DRAW_SCALE;
+            const drawX = posX - drawW / 2;
+            const drawY = posY - drawH / 2 + bounceY;
+
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(spriteImg, frame.x, frame.y, fw, fh, drawX, drawY, drawW, drawH);
+
+            // ZZZ for sleeping
+            if (currentState === 'sleeping') {
+                ctx.font = '24px serif';
+                ctx.fillStyle = 'rgba(255,255,255,0.4)';
+                const zzOffset = Math.sin(frameTick * 0.05) * 5;
+                ctx.fillText('z Z z', posX + 30, posY - 50 + zzOffset);
+            }
+
+            frameTick++;
+            if (frameTick % 8 === 0) {
+                animFrame = (animFrame + 1) % anim.frames.length;
+            }
+        }
+
+        async function loadSprite() {
+            spriteImg = new Image();
+            spriteImg.src = '/sprites/zidane';
+            await new Promise(r => { spriteImg.onload = r; spriteImg.onerror = r; });
+            try {
+                const fRes = await fetch('/frames/zidane');
+                framesData = await fRes.json();
+            } catch(e) { framesData = null; }
+            if (!animTimer) {
+                animTimer = setInterval(drawFrame, 50);
+            }
+        }
+
+        // Dialog box
+        let dialogTimeout = null;
+        function showDialog(text, level) {
+            const overlay = document.getElementById('dialog-overlay');
+            document.getElementById('dialog-text').textContent = text;
+            overlay.className = 'dialog-overlay visible level-' + (level || 'info');
+            clearTimeout(dialogTimeout);
+            dialogTimeout = setTimeout(() => {
+                overlay.className = 'dialog-overlay';
+            }, 10000);
+        }
+
+        // State controls
+        const states = ['idle', 'working', 'waiting', 'alert', 'greeting', 'sleeping', 'reporting'];
+        const controlsEl = document.getElementById('state-controls');
+        states.forEach(s => {
+            const btn = document.createElement('button');
+            btn.textContent = s;
+            btn.onclick = async () => {
+                await fetch('/api/agent-state', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({state: s})
+                });
+                updateStatus();
+            };
+            controlsEl.appendChild(btn);
+        });
+
+        async function sendMessage() {
+            const input = document.getElementById('msg-input');
+            const text = input.value.trim();
+            if (!text) return;
+            await fetch('/api/message', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({text, level: 'info'})
+            });
+            showDialog(text, 'success');
+            input.value = '';
+            updateStatus();
+        }
+        document.getElementById('msg-input').addEventListener('keypress', e => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        async function updateStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const d = await res.json();
+
+                currentState = d.agent_state || 'idle';
+
+                const badge = document.getElementById('state-badge');
+                badge.textContent = currentState;
+                badge.className = 'state-badge state-' + currentState;
+
+                document.getElementById('person-status').textContent = d.person_present ? 'Present' : 'Away';
+                document.getElementById('uptime').textContent = formatUptime(d.uptime_seconds);
+                document.getElementById('rssi').textContent = d.wifi_rssi + ' dBm';
+                document.getElementById('last-msg').textContent = d.last_message || 'None';
+
+                // Update state control buttons
+                document.querySelectorAll('.state-controls button').forEach(btn => {
+                    btn.className = btn.textContent === currentState ? 'active' : '';
+                });
+
+                // Show dialog if there's a new message
+                if (d.last_message && d.last_message !== lastKnownMessage) {
+                    showDialog(d.last_message, 'info');
+                    lastKnownMessage = d.last_message;
+                }
+
+                const tRes = await fetch('/api/timeline');
+                const timeline = await tRes.json();
+                document.getElementById('timeline').innerHTML = timeline.map(t =>
+                    '<div class="comment">' + escHtml(t) + '</div>'
+                ).join('');
+            } catch(e) { console.error(e); }
+        }
+
+        let lastKnownMessage = '';
+        function formatUptime(sec) {
+            const h = Math.floor(sec / 3600);
+            const m = Math.floor((sec % 3600) / 60);
+            return h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+        }
+        function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+        loadSprite();
+        updateStatus();
+        setInterval(updateStatus, 5000);
+    </script>
+</body>
+</html>
