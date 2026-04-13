@@ -497,7 +497,10 @@ void pw_renderer_set_state(pw_agent_state_t state)
     // Update background — schedule load for render loop (non-blocking)
     if (s_screen) {
         lvgl_port_lock(0);
+        // Show solid color while background image loads
+        lv_obj_set_style_bg_opa(s_screen, LV_OPA_COVER, 0);
         lv_obj_set_style_bg_color(s_screen, lv_color_hex(STATE_BG_COLORS[state]), 0);
+        lv_obj_add_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
         lvgl_port_unlock();
 
         if (s_bg_available && state < PW_STATE_COUNT) {
@@ -547,6 +550,8 @@ static void renderer_task(void *arg)
                 lv_img_cache_invalidate_src(&s_bg_dsc);
                 lv_img_set_src(s_bg_img, &s_bg_dsc);
                 lv_obj_clear_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
+                // Make screen bg transparent so the image shows
+                lv_obj_set_style_bg_opa(s_screen, LV_OPA_TRANSP, 0);
                 lvgl_port_unlock();
                 xSemaphoreGive(s_render_mutex);
                 ESP_LOGI(TAG, "Background loaded: tile %d", s_bg_pending_idx);
