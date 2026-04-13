@@ -312,82 +312,103 @@
             // --- FF9 Dialog Box (for alert, greeting, reporting) ---
             if (hasDialog) {
                 const boxW = 280;
-                const boxH = 56;
-                const boxX = (CANVAS_SIZE - boxW) / 2;
-                const boxY = drawY + drawH + 8;  // right below Zidane's feet
+                const boxPad = 10;
+                const lineH = 14;
+                const nameH = 18;
+                const charsPerLine = 36;
 
-                // FF9 grainy gray background
-                const r = 6;
-                ctx.beginPath();
-                ctx.moveTo(boxX + r, boxY);
-                ctx.lineTo(boxX + boxW - r, boxY);
-                ctx.quadraticCurveTo(boxX + boxW, boxY, boxX + boxW, boxY + r);
-                ctx.lineTo(boxX + boxW, boxY + boxH - r);
-                ctx.quadraticCurveTo(boxX + boxW, boxY + boxH, boxX + boxW - r, boxY + boxH);
-                ctx.lineTo(boxX + r, boxY + boxH);
-                ctx.quadraticCurveTo(boxX, boxY + boxH, boxX, boxY + boxH - r);
-                ctx.lineTo(boxX, boxY + r);
-                ctx.quadraticCurveTo(boxX, boxY, boxX + r, boxY);
-                ctx.closePath();
-
-                // Light gray base fill
-                ctx.fillStyle = '#707880';
-                ctx.fill();
-
-                // Static sand-like black dots (seeded from position so they don't move)
-                ctx.fillStyle = 'rgba(0,0,0,0.15)';
-                for (let dy = 0; dy < boxH; dy += 2) {
-                    for (let dx = 0; dx < boxW; dx += 2) {
-                        // Pseudo-random from position (deterministic = no flicker)
-                        const seed = (dx * 7 + dy * 13 + dx * dy) & 0xFF;
-                        if (seed < 40) {
-                            ctx.fillRect(boxX + dx, boxY + dy, 1, 1);
-                        }
-                    }
-                }
-
-                // Redraw rounded rect border on top of noise
-                ctx.beginPath();
-                ctx.moveTo(boxX + r, boxY);
-                ctx.lineTo(boxX + boxW - r, boxY);
-                ctx.quadraticCurveTo(boxX + boxW, boxY, boxX + boxW, boxY + r);
-                ctx.lineTo(boxX + boxW, boxY + boxH - r);
-                ctx.quadraticCurveTo(boxX + boxW, boxY + boxH, boxX + boxW - r, boxY + boxH);
-                ctx.lineTo(boxX + r, boxY + boxH);
-                ctx.quadraticCurveTo(boxX, boxY + boxH, boxX, boxY + boxH - r);
-                ctx.lineTo(boxX, boxY + r);
-                ctx.quadraticCurveTo(boxX, boxY, boxX + r, boxY);
-                ctx.closePath();
-
-                // Border — lighter gray like FF9
-                ctx.strokeStyle = '#888888';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-
-                // Clip text to box bounds
-                ctx.save();
-                ctx.beginPath();
-                ctx.rect(boxX, boxY, boxW, boxH);
-                ctx.clip();
-
-                // "Zidane:" name label in green
-                ctx.font = 'bold 13px monospace';
-                ctx.fillStyle = '#7BE87B';
-                ctx.textAlign = 'left';
-                ctx.fillText('Zidane:', boxX + 10, boxY + 16);
-
-                // Message text in white
+                // Get message text
                 const dialogMessages = {
                     alert: 'Something needs your attention!',
                     greeting: 'Morning! Ready to get to work.',
                     reporting: 'Here\'s what happened while you were away.',
                 };
                 const msgText = lastKnownMessage || dialogMessages[currentState] || '';
+
+                // Word-wrap text into lines
+                const words = msgText.split(' ');
+                const lines = [];
+                let currentLine = '';
+                for (const word of words) {
+                    const test = currentLine ? currentLine + ' ' + word : word;
+                    if (test.length > charsPerLine && currentLine) {
+                        lines.push(currentLine);
+                        currentLine = word;
+                    } else {
+                        currentLine = test;
+                    }
+                }
+                if (currentLine) lines.push(currentLine);
+
+                // Max 4 lines so box doesn't overflow the circular display
+                const maxLines = 4;
+                const visibleLines = lines.slice(0, maxLines);
+
+                // Dynamic box height: name + lines + padding
+                const boxH = nameH + visibleLines.length * lineH + boxPad * 2;
+
+                const boxX = (CANVAS_SIZE - boxW) / 2;
+                const boxY = drawY + drawH + 8;
+
+                // Clamp: don't let box extend past safe zone (circular display)
+                const maxBoxBottom = CANVAS_SIZE - 45;
+                const clampedBoxY = Math.min(boxY, maxBoxBottom - boxH);
+
+                // Rounded rect helper
+                const r = 6;
+                function roundedRect(bx, by, bw, bh) {
+                    ctx.beginPath();
+                    ctx.moveTo(bx + r, by);
+                    ctx.lineTo(bx + bw - r, by);
+                    ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + r);
+                    ctx.lineTo(bx + bw, by + bh - r);
+                    ctx.quadraticCurveTo(bx + bw, by + bh, bx + bw - r, by + bh);
+                    ctx.lineTo(bx + r, by + bh);
+                    ctx.quadraticCurveTo(bx, by + bh, bx, by + bh - r);
+                    ctx.lineTo(bx, by + r);
+                    ctx.quadraticCurveTo(bx, by, bx + r, by);
+                    ctx.closePath();
+                }
+
+                // Light gray base fill
+                roundedRect(boxX, clampedBoxY, boxW, boxH);
+                ctx.fillStyle = '#707880';
+                ctx.fill();
+
+                // Static sand-like dots
+                ctx.fillStyle = 'rgba(0,0,0,0.15)';
+                for (let dy = 0; dy < boxH; dy += 2) {
+                    for (let dx = 0; dx < boxW; dx += 2) {
+                        const seed = (dx * 7 + dy * 13 + dx * dy) & 0xFF;
+                        if (seed < 40) {
+                            ctx.fillRect(boxX + dx, clampedBoxY + dy, 1, 1);
+                        }
+                    }
+                }
+
+                // Border
+                roundedRect(boxX, clampedBoxY, boxW, boxH);
+                ctx.strokeStyle = '#888888';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Clip text to box
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(boxX, clampedBoxY, boxW, boxH);
+                ctx.clip();
+
+                // "Zidane:" in green
+                ctx.font = 'bold 13px monospace';
+                ctx.fillStyle = '#7BE87B';
+                ctx.textAlign = 'left';
+                ctx.fillText('Zidane:', boxX + boxPad, clampedBoxY + boxPad + 12);
+
+                // Message lines in white
                 ctx.font = '12px monospace';
                 ctx.fillStyle = '#FFFFFF';
-                ctx.fillText(msgText.substring(0, 38), boxX + 10, boxY + 34);
-                if (msgText.length > 38) {
-                    ctx.fillText(msgText.substring(38, 76), boxX + 10, boxY + 48);
+                for (let i = 0; i < visibleLines.length; i++) {
+                    ctx.fillText(visibleLines[i], boxX + boxPad, clampedBoxY + boxPad + nameH + 10 + i * lineH);
                 }
 
                 ctx.restore();
