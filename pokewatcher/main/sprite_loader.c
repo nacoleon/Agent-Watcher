@@ -180,7 +180,8 @@ uint16_t *pw_sprite_extract_frame_scaled(const pw_sprite_data_t *sprite,
         for (uint16_t dx = 0; dx < dst_w; dx++) {
             uint16_t sx = coord->x + (dx / scale);
             if (sx >= sprite->sheet_width) sx = sprite->sheet_width - 1;
-            buf[dy * dst_w + dx] = sheet[sy * sprite->sheet_width + sx];
+            uint16_t px = sheet[sy * sprite->sheet_width + sx];
+            buf[dy * dst_w + dx] = (px >> 8) | (px << 8);  // Byte-swap for LV_COLOR_16_SWAP
         }
     }
 

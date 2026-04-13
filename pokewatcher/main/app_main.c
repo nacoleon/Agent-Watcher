@@ -75,20 +75,6 @@ static void init_wifi(void)
 
 static void init_sdcard(void)
 {
-    // SPI bus and IO expander must be initialized first (BSP handles power to SD slot)
-    // These are idempotent — safe to call even if bsp_lvgl_init already called them
-    bsp_spi_bus_init();
-    bsp_io_expander_init();
-
-    // Enable debug logging for SD card diagnosis
-    esp_log_level_set("sdmmc_sd", ESP_LOG_DEBUG);
-    esp_log_level_set("sdmmc_cmd", ESP_LOG_DEBUG);
-    esp_log_level_set("sdspi_host", ESP_LOG_DEBUG);
-    esp_log_level_set("sdspi_transaction", ESP_LOG_DEBUG);
-    esp_log_level_set("vfs_fat_sdmmc", ESP_LOG_DEBUG);
-
-    // Give the SD card time to power up after IO expander enables it
-    vTaskDelay(pdMS_TO_TICKS(500));
 
     // Try to mount regardless of detect pin — some cards don't trigger it
     // Mount SD card via SPI (same as bsp_sdcard_init but without ESP_ERROR_CHECK)
@@ -169,7 +155,17 @@ void app_main(void)
     pw_llm_init();
     ESP_LOGI(TAG, "[5/8] LLM engine initialized");
 
-    // 6. Initialize display & renderer (also inits SPI bus + IO expander via BSP)
+    // 6. Initialize display & renderer
+    // IO expander must be up first — it powers the LCD (BSP_PWR_LCD) and SD card (BSP_PWR_SDCARD).
+    // bsp_lvgl_init sends SPI init commands to the LCD controller; if the LCD has no power,
+    // those commands are lost and the display stays off.
+    // NOTE: Do NOT call bsp_spi_bus_init() here — it must run inside bsp_lvgl_init() in
+    // the correct order relative to backlight and panel init. The idempotent guard would
+    // cause it to skip the second call, breaking the init sequence.
+    bsp_io_expander_init();
+    vTaskDelay(pdMS_TO_TICKS(100));  // Let LCD power stabilize
+    ESP_LOGI(TAG, "[6/8] IO expander ready, LCD powered");
+
     pw_renderer_init();
     ESP_LOGI(TAG, "[6/8] Renderer initialized");
 
@@ -177,8 +173,16 @@ void app_main(void)
     init_sdcard();
     ESP_LOGI(TAG, "[7/8] SD card initialized");
 
-    // Load active Pokemon sprites if roster has one
+    // Auto-add Pikachu if roster is empty (first boot with SD card)
     const char *active = pw_roster_get_active_id();
+    if (!active) {
+        if (pw_roster_add("pikachu")) {
+            active = pw_roster_get_active_id();
+            ESP_LOGI(TAG, "Auto-added Pikachu to roster");
+        }
+    }
+
+    // Load active Pokemon sprites
     if (active) {
         pw_renderer_load_pokemon(active);
     }

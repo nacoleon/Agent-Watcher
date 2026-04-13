@@ -73,6 +73,9 @@ void pw_renderer_init(void)
 {
     s_render_mutex = xSemaphoreCreateMutex();
 
+    // IO expander must be initialized first (powers LCD via BSP_PWR_LCD)
+    // This is called from app_main before pw_renderer_init
+
     // Use BSP to initialize LCD hardware + LVGL display driver
     lv_disp_t *disp = bsp_lvgl_init();
     if (!disp) {
