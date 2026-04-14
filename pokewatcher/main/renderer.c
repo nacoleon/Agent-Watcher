@@ -479,11 +479,10 @@ void pw_renderer_init(void)
 
     // ZZZ overlay for sleeping state (hidden by default)
     s_zzz_label = lv_label_create(s_screen);
-    lv_label_set_text(s_zzz_label, "z Z z");
-    lv_obj_set_style_text_color(s_zzz_label, lv_color_white(), 0);
-    lv_obj_set_style_text_font(s_zzz_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_opa(s_zzz_label, LV_OPA_70, 0);
-    lv_obj_set_pos(s_zzz_label, CENTER_X - 30, CENTER_Y - SPRITE_HALF - 30);
+    lv_label_set_text(s_zzz_label, "z");
+    lv_obj_set_style_text_color(s_zzz_label, lv_color_black(), 0);
+    lv_obj_set_style_text_font(s_zzz_label, &lv_font_montserrat_20, 0);
+    lv_obj_set_pos(s_zzz_label, CENTER_X + 10, CENTER_Y - SPRITE_HALF - 20);
     lv_obj_add_flag(s_zzz_label, LV_OBJ_FLAG_HIDDEN);
 
     ESP_LOGI(TAG, "Screen children: %u", (unsigned)lv_obj_get_child_cnt(s_screen));
@@ -648,6 +647,15 @@ static void renderer_task(void *arg)
                         lv_obj_add_flag(s_zzz_label, LV_OBJ_FLAG_HIDDEN);
                     }
                 }
+            }
+
+            // Animate ZZZ text cycle (small label, safe for per-frame updates)
+            if (s_zzz_label && s_current_state == PW_STATE_SLEEPING) {
+                static const char *ZZZ_FRAMES[] = { "z", "z Z", "z Z z", "z Z", "z" };
+                static int s_zzz_tick = 0;
+                int phase = (s_zzz_tick / 15) % 5;  // change every ~1.5 seconds
+                lv_label_set_text_static(s_zzz_label, ZZZ_FRAMES[phase]);
+                s_zzz_tick++;
             }
 
             // Apply pending message
