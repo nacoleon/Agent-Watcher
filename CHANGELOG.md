@@ -4,7 +4,27 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 
 ## [Unreleased]
 
+### Added
+- **"down" state**: New `PW_STATE_DOWN` for when OpenClaw is offline — laying-down sprite pose, dark gray background
+- **Sprite mirror support**: `mirror: true` flag in frames.json flips left-facing sprites for right-facing animations
+- **Per-frame custom sizes**: frames.json supports `w`/`h` overrides per frame (e.g., 25x13 "down" pose)
+- **Anti-reversal walking**: Idle walking no longer picks the opposite direction (no up→down→up jitter)
+- **Sprite catalog page**: `localhost:8091/sprites.html` shows all frames, animations, and coordinates with hover tooltips
+- **Himax pause/resume API**: `pw_himax_pause()`/`pw_himax_resume()` for SPI bus arbitration
+
+### Changed
+- **Backgrounds decoupled from states**: Single pool of 72 curated backgrounds rotates every 5 minutes, same for all states
+- **States only control sprite animation**: No more per-state background colors — states are sprite behavior triggered by OpenClaw
+- **Per-state animations corrected**: Each state now uses its dedicated animation (alert=combat, working=focused, sleeping=still, etc.)
+- **Fixed-position states**: Alert, greeting, sleeping, waiting, reporting, working lock sprite to center
+- **Idle walk tuning**: walk_chance 30→60, pause 30-80→20-40 (more active movement)
+- **State change uses dedicated animation**: Fixed bug where state change always set `idle_down` instead of the state's animation
+
 ### Fixed
+- **#23 Display freeze on dialog**: `pw_dialog_tick()` called `lv_obj_set_style_opa()` every frame on a 288x70 container, overwhelming the LCD SPI transfer queue until the flush callback hung permanently. Removed per-frame opacity fade — dialog now shows/hides with simple timeout. See `docs/knowledgebase/display-freeze-root-cause.md`
+- **SPI collision was misdiagnosed**: The display freeze was NOT caused by Himax SPI collision as previously documented. It was LVGL's per-frame style changes on large objects. Updated `docs/knowledgebase/spi-bus-conflict.md`
+
+### Previous Fixes
 - **#1 Dual queue consumers**: mood_engine_task and coordinator_task both consumed from the same FreeRTOS queue, causing ~50% of events to be delivered to the wrong consumer. Removed coordinator_task; mood engine now dispatches all event types via callbacks.
 - **#2 Renderer thread safety**: sprite data, animation state, and frame buffer were accessed from multiple tasks without synchronization, causing use-after-free crashes. Added a mutex to serialize all renderer state access.
 - **#3 Sprite frame OOB read**: frame extraction had no bounds checking on sheet coordinates — bad frames.json would read past the sprite sheet buffer. Added clamping.
