@@ -21,6 +21,7 @@
         .s-sleeping { background:#636e72; color:#fff; }
         .s-reporting { background:#5566AA; color:#fff; }
         .s-down { background:#2A2A2A; color:#fff; }
+        .s-wakeup { background:#CE93D8; color:#1a1a2e; }
         .btns { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0; }
         .btns button { background:#1a1a4e; color:#7BE87B; border:1px solid #2a2a5e; padding:6px 10px; border-radius:6px; cursor:pointer; font-family:inherit; font-size:11px; }
         .btns button:hover { background:#2a2a5e; }
@@ -65,7 +66,7 @@
     <button class="reboot" onclick="reboot()">Reboot Watcher</button>
 
     <script>
-        const STATES = ['idle','working','waiting','alert','greeting','sleeping','reporting','down'];
+        const STATES = ['idle','working','waiting','alert','greeting','sleeping','reporting','down','wakeup'];
         let cur = 'idle';
 
         // Build state buttons

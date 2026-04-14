@@ -76,7 +76,8 @@ const ANIM_COLORS = {
   'idle_down': '#4CAF50', 'idle_up': '#8BC34A', 'idle_left': '#CDDC39', 'idle_right': '#FFEB3B',
   'walk_down': '#FF9800', 'walk_up': '#FF5722', 'walk_left': '#E91E63', 'walk_right': '#9C27B0',
   'greeting': '#00BCD4', 'sleeping': '#3F51B5', 'working': '#F44336',
-  'alert': '#FF1744', 'reporting': '#00E676', 'waiting': '#448AFF'
+  'alert': '#FF1744', 'reporting': '#00E676', 'waiting': '#448AFF',
+  'down': '#795548', 'wakeup': '#CE93D8'
 };
 
 const ROW_LABELS = [
@@ -189,6 +190,8 @@ function drawFrameGrid() {
 
   // All known frame positions from the sprite catalog (left half only, normal Zidane)
   const KNOWN_FRAMES = [
+    // Top row (y=0) — Special sizes
+    { x:50, y:0, w:25, h:13, id:'down1', desc:'Laying down / KO (25x13)', group:'Down/KO' },
     // Front-facing
     { x:1, y:14, id:'front1', desc:'Standing, arms at sides', group:'Front-Facing' },
     { x:18, y:14, id:'front2', desc:'Standing, slight weight shift', group:'Front-Facing' },
@@ -276,7 +279,7 @@ function drawFrameGrid() {
       card.className = 'frame-card';
       if (f.bad) card.style.opacity = '0.4';
 
-      const canvas = extractFrame(f.x, f.y);
+      const canvas = extractFrame(f.x, f.y, f.w, f.h);
 
       const key = `${f.x},${f.y}`;
       const anims = frameAnimMap[key];
@@ -291,7 +294,7 @@ function drawFrameGrid() {
 
       const coordLabel = document.createElement('div');
       coordLabel.className = 'frame-label';
-      coordLabel.textContent = `(${f.x}, ${f.y})`;
+      coordLabel.textContent = f.w ? `(${f.x}, ${f.y}) ${f.w}x${f.h}` : `(${f.x}, ${f.y})`;
 
       const descLabel = document.createElement('div');
       descLabel.className = 'frame-label';
@@ -358,12 +361,16 @@ function drawAnimations() {
     let frameIdx = 0;
     const isMirrored = animData.mirror;
     function animate() {
-      const ctx = previewCanvas.getContext('2d');
-      ctx.imageSmoothingEnabled = false;
-      ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
       const f = animData.frames[frameIdx % animData.frames.length];
       const fw = f.w || FW;
       const fh = f.h || FH;
+      // Resize canvas per frame to handle mixed sizes (e.g. wakeup: 25x13 → 16x24)
+      previewCanvas.width = fw * SCALE;
+      previewCanvas.height = fh * SCALE;
+      previewCanvas.style.width = previewCanvas.width + 'px';
+      previewCanvas.style.height = previewCanvas.height + 'px';
+      const ctx = previewCanvas.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
       if (isMirrored) {
         ctx.save();
         ctx.translate(previewCanvas.width, 0);
@@ -375,7 +382,7 @@ function drawAnimations() {
       }
       frameIdx++;
     }
-    setInterval(animate, 200);
+    setInterval(animate, animData.speed || 200);
     animate();
 
     header.appendChild(previewCanvas);

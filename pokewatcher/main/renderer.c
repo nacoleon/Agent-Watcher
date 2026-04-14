@@ -50,6 +50,7 @@ static const uint32_t STATE_BG_COLORS[] = {
     [PW_STATE_SLEEPING]  = 0x404060,
     [PW_STATE_REPORTING] = 0xFDE8C8,
     [PW_STATE_DOWN]      = 0x2A2A2A,  // Dark gray
+    [PW_STATE_WAKEUP]    = 0x404060,  // Same as sleeping (waking from sleep)
 };
 
 // --- Background indices per state (matching dashboard) ---
@@ -169,6 +170,7 @@ static const mood_behavior_t STATE_BEHAVIORS[] = {
     [PW_STATE_SLEEPING]  = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
     [PW_STATE_REPORTING] = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
     [PW_STATE_DOWN]      = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
+    [PW_STATE_WAKEUP]    = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
 };
 
 // Position in display pixels (fixed-point x10 for sub-pixel movement)
@@ -191,6 +193,15 @@ static bool s_state_visuals_dirty = false;  // triggers ZZZ show/hide etc.
 // Display sleep
 static bool s_display_sleeping = false;
 static int64_t s_last_activity_ms = 0;
+
+// Wakeup animation queue — when display wakes from off, play wakeup first
+static bool s_wakeup_playing = false;
+static pw_agent_state_t s_wakeup_queued_state = PW_STATE_IDLE;
+static bool s_wakeup_has_queued_state = false;
+
+// Lock-free state change — just set flags, render loop picks them up
+static volatile pw_agent_state_t s_pending_state = PW_STATE_IDLE;
+static volatile bool s_state_changed = false;
 
 // Display geometry
 #define CENTER_X   (PW_DISPLAY_WIDTH / 2)
@@ -417,6 +428,7 @@ static void prepare_frame(void)
         [PW_STATE_SLEEPING]  = true,
         [PW_STATE_REPORTING] = true,
         [PW_STATE_DOWN]      = true,
+        [PW_STATE_WAKEUP]    = true,
     };
 
     if (s_behav_state == BEHAV_TRANSITIONING) {
@@ -424,7 +436,7 @@ static void prepare_frame(void)
         behavior_tick();
     } else if (FIXED_STATES[s_current_state]) {
         s_pos_x10 = CENTER_X * 10;
-        if (s_current_state == PW_STATE_SLEEPING || s_current_state == PW_STATE_DOWN) {
+        if (s_current_state == PW_STATE_SLEEPING || s_current_state == PW_STATE_DOWN || s_current_state == PW_STATE_WAKEUP) {
             s_pos_y10 = (CENTER_Y + 40) * 10;
         } else {
             s_pos_y10 = (PW_DISPLAY_HEIGHT - SPRITE_HALF - 20) * 10;
@@ -465,10 +477,30 @@ static void prepare_frame(void)
 
     // Advance sprite frame
     s_frame_tick++;
-    if (s_frame_tick % 3 == 0) {
+    // Wakeup uses slower frame rate (every 6 ticks instead of 3, matching 400ms speed)
+    int frame_divisor = (s_current_state == PW_STATE_WAKEUP) ? 6 : 3;
+    if (s_frame_tick % frame_divisor == 0) {
         s_current_frame++;
         if (s_current_frame >= s_current_anim->frame_count) {
             s_current_frame = s_current_anim->loop ? 0 : s_current_anim->frame_count - 1;
+
+            // Non-looping animation finished — check if wakeup completed
+            if (!s_current_anim->loop && s_wakeup_playing) {
+                s_wakeup_playing = false;
+                ESP_LOGI(TAG, "Wakeup animation finished");
+
+                if (s_wakeup_has_queued_state) {
+                    // Re-queue the original state change
+                    s_pending_state = s_wakeup_queued_state;
+                    s_state_changed = true;
+                    s_wakeup_has_queued_state = false;
+                    ESP_LOGI(TAG, "Applying queued state: %s", pw_agent_state_to_string(s_wakeup_queued_state));
+                } else {
+                    // No queued state — go to idle
+                    s_pending_state = PW_STATE_IDLE;
+                    s_state_changed = true;
+                }
+            }
         }
     }
 }
@@ -624,10 +656,6 @@ bool pw_renderer_load_character(const char *character_id)
     return true;
 }
 
-// Lock-free state change — just set flags, render loop picks them up
-static volatile pw_agent_state_t s_pending_state = PW_STATE_IDLE;
-static volatile bool s_state_changed = false;
-
 // Lock-free background change
 static volatile int s_pending_bg_idx = -1;
 static volatile bool s_bg_change_requested = false;
@@ -681,9 +709,37 @@ static void renderer_task(void *arg)
 
     while (1) {
         // --- Process pending wake (no LVGL lock needed) ---
+        // NOTE: s_wake_requested is consumed here — do NOT check it later in the loop
+        bool woke_this_frame = false;
+        bool woke_from_display_off = false;
         if (s_wake_requested) {
             s_wake_requested = false;
+            woke_from_display_off = s_display_sleeping;  // capture before display_wake clears it
+            woke_this_frame = true;
             display_wake();
+
+            // If display was actually off, play wakeup animation before anything else
+            if (woke_from_display_off) {
+                // Queue whatever state change is pending — we'll apply it after wakeup
+                if (s_state_changed) {
+                    s_wakeup_queued_state = s_pending_state;
+                    s_wakeup_has_queued_state = true;
+                    s_state_changed = false;  // consume — will re-apply after wakeup
+                }
+
+                // Start wakeup animation at current position (sleeping/down pos)
+                s_wakeup_playing = true;
+                s_current_state = PW_STATE_WAKEUP;
+                const pw_animation_t *wake_anim = pw_sprite_get_state_anim(&s_sprite, PW_STATE_WAKEUP);
+                if (wake_anim) {
+                    s_current_anim = wake_anim;
+                    s_current_frame = 0;
+                    s_frame_tick = 0;
+                }
+                s_behav_state = BEHAV_IDLE;
+                s_state_visuals_dirty = true;
+                ESP_LOGI(TAG, "Display woke from off — playing wakeup animation");
+            }
         }
 
         // --- Process pending background change (file I/O outside LVGL lock) ---
@@ -693,13 +749,17 @@ static void renderer_task(void *arg)
             if (new_idx != s_current_bg_idx && load_background_tile(new_idx)) {
                 s_current_bg_idx = new_idx;
                 // lv_img_set_src is a small update — safe inside LVGL lock
-                lvgl_port_lock(0);
-                if (s_bg_img) {
-                    lv_img_set_src(s_bg_img, &s_bg_dsc);
-                    lv_obj_clear_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
+                if (lvgl_port_lock(500)) {
+                    if (s_bg_img) {
+                        lv_img_set_src(s_bg_img, &s_bg_dsc);
+                        lv_obj_clear_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
+                    }
+                    lvgl_port_unlock();
+                    ESP_LOGI(TAG, "Background changed to tile %d", new_idx);
+                } else {
+                    ESP_LOGW(TAG, "LVGL lock timeout during bg change — will retry");
+                    s_bg_change_requested = true;  // retry next frame
                 }
-                lvgl_port_unlock();
-                ESP_LOGI(TAG, "Background changed to tile %d", new_idx);
             }
         }
 
@@ -714,27 +774,45 @@ static void renderer_task(void *arg)
                 [PW_STATE_WAITING] = true, [PW_STATE_ALERT] = true,
                 [PW_STATE_GREETING] = true, [PW_STATE_SLEEPING] = true,
                 [PW_STATE_REPORTING] = true, [PW_STATE_DOWN] = true,
+                [PW_STATE_WAKEUP] = true,
             };
 
-            if (FIXED_POS_STATES[new_state] && s_current_state == PW_STATE_IDLE) {
-                // Calculate target position for new state
-                s_target_x10 = CENTER_X * 10;
-                if (new_state == PW_STATE_SLEEPING || new_state == PW_STATE_DOWN) {
-                    s_target_y10 = (CENTER_Y + 40) * 10;
-                } else {
-                    s_target_y10 = (PW_DISPLAY_HEIGHT - SPRITE_HALF - 20) * 10;
-                }
+            // Calculate target position for new state
+            int new_target_x10 = CENTER_X * 10;
+            int new_target_y10;
+            if (!FIXED_POS_STATES[new_state]) {
+                // Idle: target is current position (no walk needed for idle)
+                new_target_x10 = s_pos_x10;
+                new_target_y10 = s_pos_y10;
+            } else if (new_state == PW_STATE_SLEEPING || new_state == PW_STATE_DOWN || new_state == PW_STATE_WAKEUP) {
+                new_target_y10 = (CENTER_Y + 40) * 10;
+            } else {
+                new_target_y10 = (PW_DISPLAY_HEIGHT - SPRITE_HALF - 20) * 10;
+            }
 
-                // Start transition walk — don't apply state yet
+            // Check if sprite needs to walk to the new position
+            int dx = new_target_x10 - s_pos_x10;
+            int dy = new_target_y10 - s_pos_y10;
+            int dist_sq = (dx / 10) * (dx / 10) + (dy / 10) * (dy / 10);
+
+            if (dist_sq > 15 * 15 && FIXED_POS_STATES[new_state]) {
+                // Walk to target position before applying new state
+                s_target_x10 = new_target_x10;
+                s_target_y10 = new_target_y10;
                 s_transition_target_state = new_state;
                 s_behav_state = BEHAV_TRANSITIONING;
                 s_state_timer = 0;
-                ESP_LOGI(TAG, "Transitioning to %s", pw_agent_state_to_string(new_state));
+                ESP_LOGI(TAG, "Transitioning to %s (dist=%d)", pw_agent_state_to_string(new_state), (int)sqrtf((float)dist_sq));
             } else {
-                // Immediate state change (non-idle origin or going to idle)
+                // Close enough or going to idle — apply immediately
                 s_current_state = new_state;
                 s_behav_state = BEHAV_IDLE;
                 s_state_timer = 0;
+
+                if (FIXED_POS_STATES[new_state]) {
+                    s_pos_x10 = new_target_x10;
+                    s_pos_y10 = new_target_y10;
+                }
 
                 const pw_animation_t *state_anim = pw_sprite_get_state_anim(&s_sprite, s_current_state);
                 if (state_anim) {
@@ -743,7 +821,7 @@ static void renderer_task(void *arg)
                 } else {
                     set_anim_by_name("idle", s_facing);
                 }
-                ESP_LOGI(TAG, "State visual applied: %s", pw_agent_state_to_string(s_current_state));
+                ESP_LOGI(TAG, "State applied: %s", pw_agent_state_to_string(s_current_state));
             }
 
             s_state_visuals_dirty = true;
@@ -781,8 +859,9 @@ static void renderer_task(void *arg)
             display_sleep();
         }
 
-        // Reset pre-sleep flag when activity resumes
-        if (s_wake_requested) {
+        // Reset pre-sleep flag when activity resumes (use woke_this_frame since
+        // s_wake_requested was consumed at top of loop)
+        if (woke_this_frame) {
             s_pre_sleep_triggered = false;
             s_sleeping_state_started_ms = 0;
         }
@@ -809,7 +888,12 @@ static void renderer_task(void *arg)
             }
 
             // Phase 2: single LVGL lock for ALL widget updates
-            lvgl_port_lock(0);
+            // Use 500ms timeout instead of wait-forever to recover from SPI flush stalls
+            if (!lvgl_port_lock(500)) {
+                ESP_LOGW(TAG, "LVGL lock timeout — skipping frame (SPI flush may be stalled)");
+                vTaskDelay(frame_delay);
+                continue;
+            }
 
             commit_frame();
 

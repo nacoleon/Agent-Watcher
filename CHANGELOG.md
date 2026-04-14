@@ -5,6 +5,22 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 ## [Unreleased]
 
 ### Added
+- **Wakeup animation**: 7-frame non-looping sequence (laying down → kneeling → standing) plays automatically when display wakes from off before any queued state applies
+- **PW_STATE_WAKEUP**: New agent state with wakeup button in web UI, purple badge, mapped to "wakeup" animation in frames.json
+- **Wakeup state queue**: When display wakes from off, pending state changes are queued and applied after wakeup animation completes
+- **Slower wakeup frame rate**: Wakeup animation runs at 2x slower speed (every 6 ticks vs 3) for a natural getting-up feel
+
+### Changed
+- **Transition walks generalized**: Sprite now walks between ANY two fixed-position states (not just from idle). Prevents large SPI dirty regions that caused display freezes
+- **LVGL lock timeout**: `lvgl_port_lock` now uses 500ms timeout instead of wait-forever, allowing renderer to recover from SPI flush stalls
+- **Sprites.html improvements**: Down/KO frame (25x13) added to frame grid, animation preview resizes per-frame for mixed-size animations, per-animation speed support
+
+### Fixed
+- **Display freeze on non-idle→sleeping transition**: Position snap from bottom-center to sleep position created large SPI dirty region. Fixed by generalizing transition walks to all state changes
+- **Display freeze on state change during sleep window**: Same root cause — no transition walk when leaving sleeping state
+- **Dead wake flag**: `s_pre_sleep_triggered` never reset after first sleep cycle because `s_wake_requested` was consumed before the reset check. Fixed with `woke_this_frame` flag
+
+### Previous
 - **"down" state**: New `PW_STATE_DOWN` for when OpenClaw is offline — laying-down sprite pose, dark gray background
 - **Sprite mirror support**: `mirror: true` flag in frames.json flips left-facing sprites for right-facing animations
 - **Per-frame custom sizes**: frames.json supports `w`/`h` overrides per frame (e.g., 25x13 "down" pose)

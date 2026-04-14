@@ -5,13 +5,14 @@ Last updated: 2026-04-14
 ## What's Done
 
 ### Firmware (pokewatcher/)
-- Agent state engine: 8 states (idle, working, waiting, alert, greeting, sleeping, reporting, down)
+- Agent state engine: 9 states (idle, working, waiting, alert, greeting, sleeping, reporting, down, wakeup)
 - "Down" state for when OpenClaw is offline (laying-down sprite pose, dark bg)
 - Per-state sprite animations: each state uses dedicated animation from frames.json
 - Mirror support: right-facing sprites flip left-facing frames horizontally
 - Per-frame custom sizes: frames.json supports w/h overrides (e.g., 25x13 "down" pose)
 - Fixed-position states: alert/reporting/greeting/working/waiting at bottom-center, sleeping/down slightly below center
-- Smooth walk-to-position transitions: sprite walks from idle position to target before entering state animation
+- Smooth walk-to-position transitions: sprite walks between ANY two states (not just from idle)
+- Wakeup animation: 7-frame sequence plays automatically when display wakes from off, queues pending state for after
 - Anti-reversal walking: idle walk never picks opposite direction (no up→down→up jitter)
 - ZZZ overlay for sleeping: animated "z Z z" text cycling, Montserrat 28 font, follows sprite position
 - FF9 dialog box at top of screen (shows on message, auto-hides after timeout, no opacity fade)
@@ -21,10 +22,10 @@ Last updated: 2026-04-14
 - Speaker muted at boot (bsp_codec_mute_set) to prevent idle amp pops
 - Hardware-like reboot from web UI (power cycles LCD/AI chip before restart)
 - API endpoints: GET /api/status, PUT /api/agent-state, POST /api/message, POST /api/reboot, PUT /api/background
-- Web UI at http://10.0.0.40 with state buttons (including "down"), message input, background controls, reboot
+- Web UI at http://10.0.0.40 with state buttons (including "down", "wakeup"), message input, background controls, reboot
 - WiFi auto-connect (YOUR_WIFI_SSID, IP: 10.0.0.40, mDNS: zidane.local)
 - Himax camera disabled (SPI collision with LCD confirmed via diagnostic logs)
-- SPI-safe renderer: prepare/commit split, single LVGL lock per frame, dirty flags
+- SPI-safe renderer: prepare/commit split, single LVGL lock per frame (500ms timeout), dirty flags
 
 ### Dashboard Preview (zidane-dashboard/)
 - Runs on localhost:8091 (python3 zidane-dashboard/server.py)
@@ -38,7 +39,7 @@ Last updated: 2026-04-14
 
 ### SD Card (sdcard_prep/characters/zidane/)
 - overworld.raw — sprite sheet (RGB565)
-- frames.json — 15 animations (idle_down/up/left/right, walk_down/up/left/right, greeting, sleeping, working, alert, reporting, waiting, down) with mirror flag support
+- frames.json — 16 animations (idle_down/up/left/right, walk_down/up/left/right, greeting, sleeping, working, alert, reporting, waiting, down, wakeup) with mirror flag and per-animation speed support
 - bg/ — 72 background tiles (.raw, 240x170 RGB565)
 
 ### Bridge (bridge/)

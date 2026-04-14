@@ -16,6 +16,7 @@
     "alert":      { "frames": [{"x": 129, "y": 101}, {"x": 18, "y": 114}], "loop": true },
     "reporting":  { "frames": [{"x": 1, "y": 14}, {"x": 69, "y": 14}], "loop": true },
     "waiting":    { "frames": [{"x": 1, "y": 14}, {"x": 69, "y": 14}], "loop": true },
-    "down":       { "frames": [{"x": 50, "y": 0, "w": 25, "h": 13}], "loop": true }
+    "down":       { "frames": [{"x": 50, "y": 0, "w": 25, "h": 13}], "loop": true },
+    "wakeup":     { "frames": [{"x": 50, "y": 0, "w": 25, "h": 13}, {"x": 34, "y": 221}, {"x": 51, "y": 221}, {"x": 1, "y": 14}, {"x": 18, "y": 14}, {"x": 52, "y": 14}, {"x": 69, "y": 14}], "loop": false, "speed": 400 }
   }
 }

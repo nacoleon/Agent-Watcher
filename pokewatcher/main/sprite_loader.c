@@ -90,6 +90,7 @@ static bool load_frame_manifest(const char *pokemon_id, pw_sprite_data_t *sprite
         [PW_STATE_SLEEPING]  = "sleeping",
         [PW_STATE_REPORTING] = "reporting",
         [PW_STATE_DOWN]      = "down",
+        [PW_STATE_WAKEUP]    = "wakeup",
     };
     for (int i = 0; i < PW_STATE_COUNT; i++) {
         strncpy(sprite->state_anim_names[i], state_anim_map[i], PW_ANIM_NAME_LEN - 1);
