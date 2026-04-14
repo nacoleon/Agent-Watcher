@@ -118,9 +118,15 @@ renderer_task loop:
   5. vTaskDelay(frame_delay)
 ```
 
-## The Background Color Problem
+## The Background Color Problem (UPDATED 2026-04-13)
 
-The screen bg color IS set correctly (confirmed via logging: `0x59FF` = warm peach in RGB565 with byte swap). But subsequent `lv_obj_set_style_bg_color` calls trigger SPI flushes that collide with Himax. The init color works because Himax hasn't started yet. State change colors only work with the dirty-flag pattern.
+**Previous theory was wrong.** We thought `lv_obj_set_style_bg_color` freezes were caused by SPI collision with Himax. Testing proved Himax was NOT the cause — the freeze happened even with Himax completely disabled.
+
+**Actual cause:** Per-frame `lv_obj_set_style_opa()` calls on a 288x70 dialog container overwhelmed the LCD SPI transfer queue. Each style change marks the area as dirty and triggers a flush. At ~10 FPS, the SPI queue backed up and the flush callback never completed, blocking LVGL forever.
+
+**See:** `docs/knowledgebase/display-freeze-root-cause.md` for the full investigation and fix.
+
+**The rule:** Never call `lv_obj_set_style_*()` every frame on objects larger than ~100x100 pixels. Use `lv_img_set_src()` and `lv_obj_set_pos()` for per-frame updates (these have small dirty regions).
 
 The "white background" users reported was actually the near-white LVGL default theme color (`0xF7BE` ≈ `#F0F4F0`) that showed before our color was applied, or an empty `lv_img` object covering the bg.
 

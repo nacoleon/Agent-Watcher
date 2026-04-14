@@ -158,7 +158,7 @@ typedef struct {
 
 // Agent state behavior parameters
 static const mood_behavior_t STATE_BEHAVIORS[] = {
-    [PW_STATE_IDLE]      = { .walk_chance = 30, .turn_chance = 20, .walk_steps_min = 6,  .walk_steps_max = 14, .speed_x10 = 15, .bounce_amp = 0, .pause_min = 30,  .pause_max = 80  },
+    [PW_STATE_IDLE]      = { .walk_chance = 60, .turn_chance = 20, .walk_steps_min = 6,  .walk_steps_max = 14, .speed_x10 = 15, .bounce_amp = 0, .pause_min = 20,  .pause_max = 40  },
     [PW_STATE_WORKING]   = { .walk_chance = 50, .turn_chance = 30, .walk_steps_min = 8,  .walk_steps_max = 16, .speed_x10 = 15, .bounce_amp = 0, .pause_min = 20,  .pause_max = 50  },
     [PW_STATE_WAITING]   = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
     [PW_STATE_ALERT]     = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
@@ -650,10 +650,10 @@ static void renderer_task(void *arg)
                 }
             }
 
-            // Apply pending message — DISABLED: dialog causes LCD freeze
+            // Apply pending message
             if (s_msg_pending) {
                 s_msg_pending = false;
-                ESP_LOGI(TAG, "Message received (dialog disabled): %s", s_pending_msg);
+                pw_dialog_show(s_pending_msg, s_pending_msg_level);
             }
 
             // Tick dialog auto-dismiss
