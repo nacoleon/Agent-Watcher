@@ -57,8 +57,8 @@ Last updated: 2026-04-13
 - [ ] More animation variety (current side-facing reuses same 2 frames)
 
 ### Firmware Stability
+- [ ] **SPI flush intermittent failure** — `spi_device_queue_trans` returns `ESP_ERR_INVALID_STATE` (0x101) intermittently on large dirty regions. Happens on ~60-80% of boots when background image is displayed. Error means "polling transaction not terminated." Diagnostic logging added to SPD2010 driver. Tested: Himax disable, LVGL core pinning, BSP flush recovery — none solved root cause. See `docs/knowledgebase/display-freeze-root-cause.md`. Boot-dependent, possibly related to DMA channel assignment or WiFi init timing.
 - [ ] Remove debug logging from prepare_frame/commit_frame (s_prepare_call_count, s_commit_call_count)
-- [ ] Investigate if display still freezes under sustained API load
 - [ ] Add null checks in renderer for edge cases (no sprite loaded, no animation)
 
 ### Bridge Improvements
