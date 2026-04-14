@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 DASHBOARD_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Agent states (matching firmware)
-STATES = ["idle", "working", "waiting", "alert", "greeting", "sleeping", "reporting"]
+STATES = ["idle", "working", "waiting", "alert", "greeting", "sleeping", "reporting", "down"]
 _state_idx = [0]
 _manual_state = [False]  # True when state was set manually (stops auto-cycling)
 

@@ -89,6 +89,7 @@
             greeting:  { walkChance: 0, turnChance: 0, walkSteps: [0,0],  speed: 0, bounceAmp: 0, pauseTicks: [100,200],  bgColor: '#FFF0C0' },
             sleeping:  { walkChance: 0.003,turnChance: 0.005,walkSteps: [2,5],   speed: 0.5, bounceAmp: 0, pauseTicks: [100,250],bgColor: '#404060' },
             reporting: { walkChance: 0.01, turnChance: 0.01, walkSteps: [3,6],   speed: 1.0, bounceAmp: 0, pauseTicks: [50,100], bgColor: '#FDE8C8' },
+            down:      { walkChance: 0, turnChance: 0, walkSteps: [0,0], speed: 0, bounceAmp: 0, pauseTicks: [100,200], bgColor: '#2a2a2a' },
         };
 
         // Background images per state (12 each, indices into backgrounds sheet)
@@ -154,16 +155,25 @@
             return Math.sqrt(dx * dx + dy * dy) >= MOVE_RADIUS - 5;
         }
 
+        const OPPOSITE = { down: 'up', up: 'down', left: 'right', right: 'left' };
+        let lastWalkDir = '';  // track last walk direction to avoid reversals
+
         function pickWalkDir() {
             const toCenter = { x: CENTER - posX, y: CENTER - posY };
             const dist = Math.sqrt(toCenter.x * toCenter.x + toCenter.y * toCenter.y);
+            let newFacing;
             if (dist > 40 && Math.random() < 0.6) {
-                facing = Math.abs(toCenter.x) > Math.abs(toCenter.y)
+                // Drift back toward center when far out
+                newFacing = Math.abs(toCenter.x) > Math.abs(toCenter.y)
                     ? (toCenter.x > 0 ? 'right' : 'left')
                     : (toCenter.y > 0 ? 'down' : 'up');
             } else {
-                facing = DIRS[Math.floor(Math.random() * 4)];
+                // Pick a random direction, but never the exact opposite of last walk
+                const choices = DIRS.filter(d => d !== OPPOSITE[lastWalkDir]);
+                newFacing = choices[Math.floor(Math.random() * choices.length)];
             }
+            facing = newFacing;
+            lastWalkDir = newFacing;
             walkDir = DIR_VEC[facing];
         }
 
@@ -174,6 +184,8 @@
             reporting: 'reporting',
             waiting: 'waiting',
             greeting: 'greeting',
+            down: 'down',
+            working: 'working',
         };
 
         function behaviorTick() {
@@ -191,11 +203,7 @@
             switch (state) {
             case 'idle':
                 setAnim('idle_' + facing);
-                if (Math.random() < b.turnChance) {
-                    facing = DIRS[Math.floor(Math.random() * 4)];
-                    setAnim('idle_' + facing);
-                    state = 'pausing'; stateTimer = 0;
-                } else if (Math.random() < b.walkChance) {
+                if (Math.random() < b.walkChance) {
                     pickWalkDir();
                     const [min, max] = b.walkSteps;
                     walkStepsLeft = min + Math.floor(Math.random() * (max - min));
@@ -237,7 +245,7 @@
             const frame = anim.frames[animFrame];
             // Per-frame width override (sleeping frames are 15px wide)
             const fw = frame.w || framesData.frame_width;
-            const fh = framesData.frame_height;
+            const fh = frame.h || framesData.frame_height;
 
             const b = STATE_BEHAVIOR[currentState] || STATE_BEHAVIOR.idle;
 
@@ -273,7 +281,15 @@
             const drawY = posY - drawH / 2 + bounceY + dialogShiftY;
 
             ctx.imageSmoothingEnabled = false;
-            ctx.drawImage(spriteImg, frame.x, frame.y, fw, fh, drawX, drawY, drawW, drawH);
+            if (anim.mirror) {
+                ctx.save();
+                ctx.translate(drawX + drawW, drawY);
+                ctx.scale(-1, 1);
+                ctx.drawImage(spriteImg, frame.x, frame.y, fw, fh, 0, 0, drawW, drawH);
+                ctx.restore();
+            } else {
+                ctx.drawImage(spriteImg, frame.x, frame.y, fw, fh, drawX, drawY, drawW, drawH);
+            }
 
             // --- Status bubbles and overlays ---
 

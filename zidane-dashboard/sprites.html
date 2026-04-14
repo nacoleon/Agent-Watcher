@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Zidane Sprite Catalog</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; color: #e0e0e0; font-family: 'Courier New', monospace; padding: 20px; }
+  h1 { color: #f0c040; margin-bottom: 10px; }
+  h2 { color: #80c0ff; margin: 30px 0 15px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+  h3 { color: #c0c0c0; margin: 20px 0 10px; }
+  .back { color: #80c0ff; text-decoration: none; display: inline-block; margin-bottom: 15px; }
+  .back:hover { text-decoration: underline; }
+
+  .anim-section { margin-bottom: 30px; background: #222244; border-radius: 8px; padding: 15px; }
+  .anim-header { display: flex; align-items: center; gap: 15px; margin-bottom: 10px; }
+  .anim-name { font-size: 18px; color: #f0c040; font-weight: bold; }
+  .anim-meta { color: #888; font-size: 13px; }
+  .anim-preview { display: inline-block; background: #444; border-radius: 4px; padding: 5px; margin-right: 5px; }
+
+  .frames-row { display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-start; }
+  .frame-card { background: #2a2a4a; border-radius: 6px; padding: 10px; text-align: center; border: 1px solid #333; }
+  .frame-card:hover { border-color: #f0c040; }
+  .frame-canvas { image-rendering: pixelated; display: block; margin: 0 auto 8px; }
+  .frame-label { font-size: 11px; color: #aaa; }
+  .frame-coord { font-size: 12px; color: #80c0ff; font-weight: bold; }
+
+  .sheet-section { margin: 30px 0; }
+  .sheet-canvas { image-rendering: pixelated; border: 1px solid #555; display: block; }
+  .sheet-info { color: #888; font-size: 13px; margin-top: 5px; }
+
+  .grid-section { margin: 30px 0; }
+  .grid-row { display: flex; gap: 2px; margin-bottom: 2px; }
+  .grid-cell { position: relative; cursor: pointer; }
+  .grid-cell:hover { outline: 2px solid #f0c040; z-index: 1; }
+  .grid-cell canvas { image-rendering: pixelated; display: block; }
+  .grid-tooltip { display: none; position: absolute; bottom: 105%; left: 50%; transform: translateX(-50%);
+    background: #111; color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 11px; white-space: nowrap; z-index: 10; }
+  .grid-cell:hover .grid-tooltip { display: block; }
+
+  .legend { display: flex; gap: 20px; margin: 15px 0; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .legend-swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #555; }
+</style>
+</head>
+<body>
+
+<a class="back" href="/">&larr; Back to Dashboard</a>
+<h1>Zidane Sprite Catalog</h1>
+<p style="color:#888; margin-bottom: 5px;">FFRK Zidane Tribal &mdash; 384x256 sprite sheet, 16x24 frames at 4x scale</p>
+<p style="color:#666; margin-bottom: 20px;">Hover over the grid to identify frames. Click an animation to see it play.</p>
+
+<h2>Full Sprite Sheet (4x)</h2>
+<div class="sheet-section">
+  <canvas id="full-sheet" class="sheet-canvas"></canvas>
+  <div class="sheet-info">384x256 original &rarr; 1536x1024 at 4x. Left half = normal Zidane, right half = Trance (pink).</div>
+</div>
+
+<h2>Frame Grid (16x24 cells)</h2>
+<p style="color:#888; margin-bottom:10px;">Every 16x24 cell in the sprite sheet. Hover for coordinates, colored borders show which animations use each frame.</p>
+<div class="legend" id="legend"></div>
+<div class="grid-section" id="frame-grid"></div>
+
+<h2>Animations</h2>
+<div id="animations"></div>
+
+<h2>Individual Frames by Row</h2>
+<div id="all-frames"></div>
+
+<script>
+const SCALE = 4;
+const FW = 16, FH = 24;
+const SHEET_W = 384, SHEET_H = 256;
+
+const ANIM_COLORS = {
+  'idle_down': '#4CAF50', 'idle_up': '#8BC34A', 'idle_left': '#CDDC39', 'idle_right': '#FFEB3B',
+  'walk_down': '#FF9800', 'walk_up': '#FF5722', 'walk_left': '#E91E63', 'walk_right': '#9C27B0',
+  'greeting': '#00BCD4', 'sleeping': '#3F51B5', 'working': '#F44336',
+  'alert': '#FF1744', 'reporting': '#00E676', 'waiting': '#448AFF'
+};
+
+const ROW_LABELS = [
+  { y: 14, name: 'Front-Facing', desc: 'Walking toward camera' },
+  { y: 39, name: 'Back-Facing', desc: 'Walking away from camera' },
+  { y: 64, name: 'Side-Facing', desc: 'Walking sideways' },
+  { y: 89, name: 'Action Row 1', desc: 'Running/Dashing' },
+  { y: 101, name: 'Action Row 2', desc: 'Combat Stance' },
+  { y: 114, name: 'Action Row 3', desc: 'Slashing/Attack' },
+  { y: 139, name: 'Action Row 5', desc: 'Dynamic Running (side)' },
+  { y: 164, name: 'Action Row 7', desc: 'Attack Follow-Through' },
+  { y: 200, name: 'Special Poses', desc: 'KO/Hurt/Sleep' },
+  { y: 225, name: 'Special Poses 2', desc: 'Fallen/Kneeling' },
+];
+
+let spriteImg = null;
+let framesData = null;
+
+async function init() {
+  // Load sprite sheet
+  spriteImg = new Image();
+  spriteImg.src = '/sprites/zidane';
+  await new Promise(r => { spriteImg.onload = r; });
+
+  // Load frames.json
+  const resp = await fetch('/frames/zidane');
+  framesData = await resp.json();
+
+  drawFullSheet();
+  drawFrameGrid();
+  drawAnimations();
+  drawAllFrames();
+}
+
+function extractFrame(x, y, w, h) {
+  const canvas = document.createElement('canvas');
+  canvas.width = (w || FW) * SCALE;
+  canvas.height = (h || FH) * SCALE;
+  canvas.className = 'frame-canvas';
+  canvas.style.width = canvas.width + 'px';
+  canvas.style.height = canvas.height + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(spriteImg, x, y, w || FW, h || FH, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+function drawFullSheet() {
+  const canvas = document.getElementById('full-sheet');
+  canvas.width = SHEET_W * SCALE;
+  canvas.height = SHEET_H * SCALE;
+  canvas.style.width = (SHEET_W * SCALE) + 'px';
+  canvas.style.height = (SHEET_H * SCALE) + 'px';
+  canvas.style.cursor = 'crosshair';
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(spriteImg, 0, 0, canvas.width, canvas.height);
+
+  // Coordinate tooltip
+  const tooltip = document.createElement('div');
+  tooltip.style.cssText = 'position:fixed;background:#111;color:#fff;padding:4px 10px;border-radius:4px;font-size:13px;pointer-events:none;display:none;z-index:100;font-family:monospace';
+  document.body.appendChild(tooltip);
+
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) / SCALE);
+    const y = Math.floor((e.clientY - rect.top) / SCALE);
+    tooltip.textContent = `(${x}, ${y})`;
+    tooltip.style.display = 'block';
+    tooltip.style.left = (e.clientX + 15) + 'px';
+    tooltip.style.top = (e.clientY - 10) + 'px';
+  });
+  canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+
+  // Click to highlight a 16x24 frame at that position
+  canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) / SCALE);
+    const y = Math.floor((e.clientY - rect.top) / SCALE);
+    // Redraw sheet then highlight
+    ctx.drawImage(spriteImg, 0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#f0c040';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x * SCALE, y * SCALE, FW * SCALE, FH * SCALE);
+    tooltip.textContent = `Frame: (${x}, ${y}) — ${FW}x${FH}`;
+  });
+}
+
+function drawFrameGrid() {
+  const container = document.getElementById('frame-grid');
+  const legendEl = document.getElementById('legend');
+
+  // Build lookup: which animations use which frame coords
+  const frameAnimMap = {};
+  for (const [animName, animData] of Object.entries(framesData.animations)) {
+    for (const frame of animData.frames) {
+      const key = `${frame.x},${frame.y}`;
+      if (!frameAnimMap[key]) frameAnimMap[key] = [];
+      if (!frameAnimMap[key].includes(animName)) frameAnimMap[key].push(animName);
+    }
+  }
+
+  // Legend
+  for (const [name, color] of Object.entries(ANIM_COLORS)) {
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    item.innerHTML = `<div class="legend-swatch" style="background:${color}"></div>${name}`;
+    legendEl.appendChild(item);
+  }
+
+  // All known frame positions from the sprite catalog (left half only, normal Zidane)
+  const KNOWN_FRAMES = [
+    // Front-facing
+    { x:1, y:14, id:'front1', desc:'Standing, arms at sides', group:'Front-Facing' },
+    { x:18, y:14, id:'front2', desc:'Standing, slight weight shift', group:'Front-Facing' },
+    { x:35, y:14, id:'front3', desc:'Walk cycle, left foot forward', group:'Front-Facing' },
+    { x:52, y:14, id:'front4', desc:'Walk cycle, right foot forward', group:'Front-Facing' },
+    { x:69, y:14, id:'front5', desc:'Standing, relaxed pose', group:'Front-Facing' },
+    { x:1, y:39, id:'front6', desc:'Front, right foot forward', group:'Front-Facing' },
+    { x:69, y:39, id:'front7', desc:'Front, relaxed', group:'Front-Facing' },
+    { x:100, y:26, id:'front8', desc:'Front, left foot forward', group:'Front-Facing' },
+    // Back-facing
+    { x:18, y:39, id:'back1', desc:'Back-facing, standing', group:'Back-Facing' },
+    { x:35, y:39, id:'back2', desc:'Back-facing, walk left foot', group:'Back-Facing' },
+    { x:52, y:39, id:'back3', desc:'Back-facing, walk right foot', group:'Back-Facing' },
+    // Side-facing (y=64)
+    { x:1, y:64, id:'side_bad1', desc:'WHITE/GHOST — do not use', bad:true, group:'Side-Facing' },
+    { x:18, y:64, id:'side_bad2', desc:'WHITE/GHOST — do not use', bad:true, group:'Side-Facing' },
+    { x:35, y:64, id:'side1', desc:'Side stand/walk frame 1', group:'Side-Facing' },
+    { x:52, y:64, id:'side2', desc:'Side stand/walk frame 2', group:'Side-Facing' },
+    { x:69, y:64, id:'side3', desc:'Side walk frame 3', group:'Side-Facing' },
+    // Action Row 1 — Running (y=89)
+    { x:1, y:89, id:'act1_1', desc:'Dash/run frame 1', group:'Running/Dashing' },
+    { x:18, y:89, id:'act1_2', desc:'Dash/run frame 2', group:'Running/Dashing' },
+    { x:35, y:89, id:'act1_3', desc:'Dash/run frame 3', group:'Running/Dashing' },
+    { x:52, y:89, id:'act1_4', desc:'WHITE — do not use', bad:true, group:'Running/Dashing' },
+    // Action Row 2 — Combat Stance (y=101)
+    { x:98, y:101, id:'act2_1', desc:'Blade draw / ready stance', group:'Combat Stance' },
+    { x:129, y:101, id:'act2_2', desc:'Combat ready', group:'Combat Stance' },
+    // Action Row 2 — Trance Combat Stance (y=101, right half)
+    { x:290, y:101, id:'trance_act2_1', desc:'Trance blade draw', group:'Trance Combat' },
+    { x:321, y:101, id:'trance_act2_2', desc:'Trance combat ready', group:'Trance Combat' },
+    // Action Row 3 — Slashing (y=114)
+    { x:1, y:114, id:'act3_1', desc:'Attack wind-up', group:'Slashing/Attack' },
+    { x:18, y:114, id:'act3_2', desc:'Slash frame 1', group:'Slashing/Attack' },
+    { x:35, y:114, id:'act3_3', desc:'Slash frame 2', group:'Slashing/Attack' },
+    { x:52, y:114, id:'act3_4', desc:'Slash follow-through', group:'Slashing/Attack' },
+    { x:69, y:114, id:'act3_5', desc:'WHITE — do not use', bad:true, group:'Slashing/Attack' },
+    // Trance Slashing (y=114, right half)
+    { x:193, y:114, id:'trance_act3_1', desc:'Trance attack wind-up', group:'Trance Combat' },
+    { x:210, y:114, id:'trance_act3_2', desc:'Trance slash frame 1', group:'Trance Combat' },
+    // Action Row 5 — Dynamic Running (y=139)
+    { x:1, y:139, id:'act5_1', desc:'Run side frame 1', group:'Dynamic Running' },
+    { x:18, y:139, id:'act5_2', desc:'Run side frame 2', group:'Dynamic Running' },
+    { x:35, y:139, id:'act5_3', desc:'Run side frame 3', group:'Dynamic Running' },
+    { x:52, y:139, id:'act5_4', desc:'Run side frame 4', group:'Dynamic Running' },
+    { x:69, y:139, id:'act5_5', desc:'Run side frame 5', group:'Dynamic Running' },
+    // Action Row 7 — Follow-Through (y=163-164)
+    { x:1, y:164, id:'act7_1', desc:'Follow-through frame 1', group:'Attack Follow-Through' },
+    { x:18, y:164, id:'act7_2', desc:'Follow-through frame 2', group:'Attack Follow-Through' },
+    { x:35, y:163, id:'act7_3', desc:'Follow-through frame 3', group:'Attack Follow-Through' },
+    { x:52, y:163, id:'act7_4', desc:'Follow-through frame 4', group:'Attack Follow-Through' },
+    { x:69, y:163, id:'act7_5', desc:'Follow-through frame 5', group:'Attack Follow-Through' },
+    // Special Poses (y=200+)
+    { x:1, y:200, id:'spc1', desc:'Eyes closed, slumped — sleeping', group:'Special Poses' },
+    { x:17, y:200, id:'spc2', desc:'Eyes closed variant', group:'Special Poses' },
+    { x:50, y:200, id:'spc3', desc:'Kneeling', group:'Special Poses' },
+    { x:1, y:225, id:'spc5', desc:'Fallen/collapsed', group:'Special Poses' },
+    { x:34, y:221, id:'spc6', desc:'Kneeling variant 1', group:'Special Poses' },
+    { x:51, y:221, id:'spc7', desc:'Kneeling variant 2', group:'Special Poses' },
+    { x:129, y:226, id:'spc8', desc:'Victory/celebration', group:'Special Poses' },
+  ];
+
+  // Group by explicit group field
+  const rows = {};
+  for (const f of KNOWN_FRAMES) {
+    const rowKey = f.group || `y=${f.y}`;
+    if (!rows[rowKey]) rows[rowKey] = { label: rowKey, frames: [] };
+    rows[rowKey].frames.push(f);
+  }
+
+  for (const [rowName, rowData] of Object.entries(rows)) {
+    const rowLabel = document.createElement('h3');
+    rowLabel.textContent = rowName;
+    rowLabel.style.margin = '15px 0 8px';
+    container.appendChild(rowLabel);
+
+    const rowDiv = document.createElement('div');
+    rowDiv.className = 'frames-row';
+
+    for (const f of rowData.frames) {
+      const cell = document.createElement('div');
+      cell.className = 'grid-cell';
+      cell.style.display = 'inline-block';
+
+      const card = document.createElement('div');
+      card.className = 'frame-card';
+      if (f.bad) card.style.opacity = '0.4';
+
+      const canvas = extractFrame(f.x, f.y);
+
+      const key = `${f.x},${f.y}`;
+      const anims = frameAnimMap[key];
+      if (anims) {
+        card.style.borderColor = ANIM_COLORS[anims[0]] || '#fff';
+        card.style.borderWidth = '2px';
+      }
+
+      const idLabel = document.createElement('div');
+      idLabel.className = 'frame-coord';
+      idLabel.textContent = f.id;
+
+      const coordLabel = document.createElement('div');
+      coordLabel.className = 'frame-label';
+      coordLabel.textContent = `(${f.x}, ${f.y})`;
+
+      const descLabel = document.createElement('div');
+      descLabel.className = 'frame-label';
+      descLabel.textContent = f.desc;
+      descLabel.style.maxWidth = '80px';
+
+      const animLabel = document.createElement('div');
+      animLabel.className = 'frame-label';
+      if (anims) {
+        animLabel.textContent = anims.join(', ');
+        animLabel.style.color = ANIM_COLORS[anims[0]] || '#80c0ff';
+      } else {
+        animLabel.textContent = f.bad ? 'DO NOT USE' : 'unused';
+        animLabel.style.color = f.bad ? '#ff4444' : '#555';
+      }
+
+      card.appendChild(canvas);
+      card.appendChild(idLabel);
+      card.appendChild(coordLabel);
+      card.appendChild(descLabel);
+      card.appendChild(animLabel);
+      cell.appendChild(card);
+      rowDiv.appendChild(cell);
+    }
+    container.appendChild(rowDiv);
+  }
+}
+
+function drawAnimations() {
+  const container = document.getElementById('animations');
+
+  for (const [animName, animData] of Object.entries(framesData.animations)) {
+    const section = document.createElement('div');
+    section.className = 'anim-section';
+
+    const header = document.createElement('div');
+    header.className = 'anim-header';
+
+    const name = document.createElement('span');
+    name.className = 'anim-name';
+    name.style.color = ANIM_COLORS[animName] || '#f0c040';
+    name.textContent = animName;
+
+    const meta = document.createElement('span');
+    meta.className = 'anim-meta';
+    let metaText = `${animData.frames.length} frames, loop=${animData.loop}`;
+    if (animData.mirror) metaText += ', mirror=true';
+    meta.textContent = metaText;
+
+    // Animated preview — use first frame's size for canvas
+    const firstFrame = animData.frames[0];
+    const prevW = (firstFrame.w || FW) * SCALE;
+    const prevH = (firstFrame.h || FH) * SCALE;
+    const previewCanvas = document.createElement('canvas');
+    previewCanvas.width = prevW;
+    previewCanvas.height = prevH;
+    previewCanvas.style.width = prevW + 'px';
+    previewCanvas.style.height = prevH + 'px';
+    previewCanvas.style.imageRendering = 'pixelated';
+    previewCanvas.style.background = '#333';
+    previewCanvas.style.borderRadius = '4px';
+    previewCanvas.className = 'anim-preview';
+
+    let frameIdx = 0;
+    const isMirrored = animData.mirror;
+    function animate() {
+      const ctx = previewCanvas.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+      const f = animData.frames[frameIdx % animData.frames.length];
+      const fw = f.w || FW;
+      const fh = f.h || FH;
+      if (isMirrored) {
+        ctx.save();
+        ctx.translate(previewCanvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(spriteImg, f.x, f.y, fw, fh, 0, 0, previewCanvas.width, previewCanvas.height);
+        ctx.restore();
+      } else {
+        ctx.drawImage(spriteImg, f.x, f.y, fw, fh, 0, 0, previewCanvas.width, previewCanvas.height);
+      }
+      frameIdx++;
+    }
+    setInterval(animate, 200);
+    animate();
+
+    header.appendChild(previewCanvas);
+    header.appendChild(name);
+    header.appendChild(meta);
+    section.appendChild(header);
+
+    const row = document.createElement('div');
+    row.className = 'frames-row';
+
+    animData.frames.forEach((f, i) => {
+      const card = document.createElement('div');
+      card.className = 'frame-card';
+
+      const canvas = extractFrame(f.x, f.y, f.w, f.h);
+      const coord = document.createElement('div');
+      coord.className = 'frame-coord';
+      coord.textContent = `(${f.x}, ${f.y})${f.w ? ` ${f.w}x${f.h}` : ''}`;
+
+      const label = document.createElement('div');
+      label.className = 'frame-label';
+      label.textContent = `Frame ${i}`;
+
+      card.appendChild(canvas);
+      card.appendChild(coord);
+      card.appendChild(label);
+      row.appendChild(card);
+    });
+
+    section.appendChild(row);
+    container.appendChild(section);
+  }
+}
+
+function drawAllFrames() {
+  const container = document.getElementById('all-frames');
+
+  for (const rowInfo of ROW_LABELS) {
+    const h3 = document.createElement('h3');
+    h3.textContent = `${rowInfo.name} (y=${rowInfo.y}) — ${rowInfo.desc}`;
+    container.appendChild(h3);
+
+    const row = document.createElement('div');
+    row.className = 'frames-row';
+    row.style.marginBottom = '15px';
+
+    // Extract frames across x positions in this row (left half only)
+    for (let x = 0; x < 192; x += FW) {
+      // Check if this cell has any non-transparent pixels
+      const testCanvas = document.createElement('canvas');
+      testCanvas.width = FW;
+      testCanvas.height = FH;
+      const testCtx = testCanvas.getContext('2d');
+      testCtx.drawImage(spriteImg, x, rowInfo.y, FW, FH, 0, 0, FW, FH);
+      const data = testCtx.getImageData(0, 0, FW, FH).data;
+      let hasContent = false;
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] > 10) { hasContent = true; break; }
+      }
+      if (!hasContent) continue;
+
+      const card = document.createElement('div');
+      card.className = 'frame-card';
+
+      const canvas = extractFrame(x, rowInfo.y);
+      const coord = document.createElement('div');
+      coord.className = 'frame-coord';
+      coord.textContent = `(${x}, ${rowInfo.y})`;
+
+      // Check if used in any animation
+      const key = `${x},${rowInfo.y}`;
+      let usedIn = [];
+      for (const [animName, animData] of Object.entries(framesData.animations)) {
+        for (const f of animData.frames) {
+          if (f.x === x && f.y === rowInfo.y) { usedIn.push(animName); break; }
+        }
+      }
+
+      const label = document.createElement('div');
+      label.className = 'frame-label';
+      label.textContent = usedIn.length > 0 ? usedIn.join(', ') : 'unused';
+      if (usedIn.length === 0) label.style.color = '#666';
+
+      card.appendChild(canvas);
+      card.appendChild(coord);
+      card.appendChild(label);
+      row.appendChild(card);
+    }
+
+    container.appendChild(row);
+  }
+}
+
+init();
+</script>
+</body>
+</html>

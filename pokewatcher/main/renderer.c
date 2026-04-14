@@ -22,6 +22,7 @@ static SemaphoreHandle_t s_render_mutex = NULL;
 static lv_obj_t *s_screen = NULL;
 static lv_obj_t *s_bg_img = NULL;
 static lv_obj_t *s_sprite_img = NULL;
+static lv_obj_t *s_zzz_label = NULL;
 
 // Background state
 static uint8_t *s_bg_buf = NULL;
@@ -158,11 +159,11 @@ typedef struct {
 static const mood_behavior_t STATE_BEHAVIORS[] = {
     [PW_STATE_IDLE]      = { .walk_chance = 30, .turn_chance = 20, .walk_steps_min = 6,  .walk_steps_max = 14, .speed_x10 = 15, .bounce_amp = 0, .pause_min = 30,  .pause_max = 80  },
     [PW_STATE_WORKING]   = { .walk_chance = 50, .turn_chance = 30, .walk_steps_min = 8,  .walk_steps_max = 16, .speed_x10 = 15, .bounce_amp = 0, .pause_min = 20,  .pause_max = 50  },
-    [PW_STATE_WAITING]   = { .walk_chance = 5,  .turn_chance = 15, .walk_steps_min = 2,  .walk_steps_max = 5,  .speed_x10 = 8,  .bounce_amp = 0, .pause_min = 80,  .pause_max = 200 },
-    [PW_STATE_ALERT]     = { .walk_chance = 80, .turn_chance = 50, .walk_steps_min = 10, .walk_steps_max = 25, .speed_x10 = 30, .bounce_amp = 4, .pause_min = 5,   .pause_max = 15  },
-    [PW_STATE_GREETING]  = { .walk_chance = 60, .turn_chance = 40, .walk_steps_min = 8,  .walk_steps_max = 20, .speed_x10 = 25, .bounce_amp = 3, .pause_min = 10,  .pause_max = 30  },
-    [PW_STATE_SLEEPING]  = { .walk_chance = 3,  .turn_chance = 5,  .walk_steps_min = 2,  .walk_steps_max = 5,  .speed_x10 = 5,  .bounce_amp = 0, .pause_min = 100, .pause_max = 250 },
-    [PW_STATE_REPORTING] = { .walk_chance = 10, .turn_chance = 10, .walk_steps_min = 3,  .walk_steps_max = 6,  .speed_x10 = 10, .bounce_amp = 0, .pause_min = 50,  .pause_max = 100 },
+    [PW_STATE_WAITING]   = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
+    [PW_STATE_ALERT]     = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
+    [PW_STATE_GREETING]  = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
+    [PW_STATE_SLEEPING]  = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
+    [PW_STATE_REPORTING] = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
 };
 
 // Position in display pixels (fixed-point x10 for sub-pixel movement)
@@ -346,7 +347,23 @@ static void prepare_frame(void)
     }
     if (!s_current_anim || s_current_anim->frame_count == 0) { s_frame_ready = false; return; }
 
-    behavior_tick();
+    // States that stay centered — no wandering
+    static const bool FIXED_STATES[] = {
+        [PW_STATE_IDLE]      = false,
+        [PW_STATE_WORKING]   = false,
+        [PW_STATE_WAITING]   = true,
+        [PW_STATE_ALERT]     = true,
+        [PW_STATE_GREETING]  = true,
+        [PW_STATE_SLEEPING]  = true,
+        [PW_STATE_REPORTING] = true,
+    };
+
+    if (FIXED_STATES[s_current_state]) {
+        s_pos_x10 = CENTER_X * 10;
+        s_pos_y10 = CENTER_Y * 10;
+    } else {
+        behavior_tick();
+    }
 
     const pw_frame_coord_t *coord = &s_current_anim->frames[s_current_frame];
 
@@ -447,6 +464,15 @@ void pw_renderer_init(void)
     s_sprite_img = lv_img_create(s_screen);
     lv_obj_remove_style_all(s_sprite_img);
     lv_obj_set_pos(s_sprite_img, CENTER_X - SPRITE_HALF, CENTER_Y - SPRITE_HALF);
+
+    // ZZZ overlay for sleeping state (hidden by default)
+    s_zzz_label = lv_label_create(s_screen);
+    lv_label_set_text(s_zzz_label, "z Z z");
+    lv_obj_set_style_text_color(s_zzz_label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(s_zzz_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_opa(s_zzz_label, LV_OPA_70, 0);
+    lv_obj_set_pos(s_zzz_label, CENTER_X - 30, CENTER_Y - SPRITE_HALF - 30);
+    lv_obj_add_flag(s_zzz_label, LV_OBJ_FLAG_HIDDEN);
 
     ESP_LOGI(TAG, "Screen children: %u", (unsigned)lv_obj_get_child_cnt(s_screen));
 
@@ -589,6 +615,15 @@ static void renderer_task(void *arg)
             if (s_bg_color_dirty && s_screen) {
                 s_bg_color_dirty = false;
                 lv_obj_set_style_bg_color(s_screen, lv_color_hex(STATE_BG_COLORS[s_current_state]), 0);
+
+                // Show/hide ZZZ overlay
+                if (s_zzz_label) {
+                    if (s_current_state == PW_STATE_SLEEPING) {
+                        lv_obj_clear_flag(s_zzz_label, LV_OBJ_FLAG_HIDDEN);
+                    } else {
+                        lv_obj_add_flag(s_zzz_label, LV_OBJ_FLAG_HIDDEN);
+                    }
+                }
             }
 
             // Apply pending message
