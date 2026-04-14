@@ -41,7 +41,9 @@
 #define PW_NVS_NAMESPACE       "pokewatcher"
 
 // Display sleep
-#define PW_DISPLAY_SLEEP_TIMEOUT_MS 300000  // 5 minutes
+#define PW_DISPLAY_SLEEP_TIMEOUT_MS  180000  // 3 minutes
+#define PW_SLEEP_STATE_BEFORE_MS      15000  // trigger sleeping state 15s before display off
+#define PW_SLEEP_AFTER_STATE_MS       15000  // display off 15s after sleeping state is set
 
 // WiFi defaults (NVS overrides at runtime)
 #define PW_WIFI_SSID_DEFAULT       "YOUR_WIFI_SSID"

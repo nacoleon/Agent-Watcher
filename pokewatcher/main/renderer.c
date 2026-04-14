@@ -134,6 +134,7 @@ typedef enum {
     BEHAV_IDLE,
     BEHAV_WALKING,
     BEHAV_PAUSING,
+    BEHAV_TRANSITIONING,  // walking toward target position for state change
 } behav_state_t;
 
 typedef enum {
@@ -180,6 +181,12 @@ static int s_walk_steps_left = 0;
 static int s_pause_target = 0;
 static int s_frame_tick = 0;
 static facing_dir_t s_last_walk_dir = DIR_DOWN;  // anti-reversal tracking
+
+// Transition state — walk to target position before applying new state
+static int s_target_x10 = 0;
+static int s_target_y10 = 0;
+static pw_agent_state_t s_transition_target_state = PW_STATE_IDLE;
+static bool s_state_visuals_dirty = false;  // triggers ZZZ show/hide etc.
 
 // Display sleep
 static bool s_display_sleeping = false;
@@ -318,6 +325,48 @@ static void behavior_tick(void)
             s_state_timer = 0;
         }
         break;
+
+    case BEHAV_TRANSITIONING: {
+        // Walk toward target position, then apply state change
+        int dx = s_target_x10 - s_pos_x10;
+        int dy = s_target_y10 - s_pos_y10;
+        int dist_sq = (dx / 10) * (dx / 10) + (dy / 10) * (dy / 10);
+
+        if (dist_sq < 10 * 10) {
+            // Close enough — snap to target and apply state
+            s_pos_x10 = s_target_x10;
+            s_pos_y10 = s_target_y10;
+            s_current_state = s_transition_target_state;
+            const pw_animation_t *state_anim = pw_sprite_get_state_anim(&s_sprite, s_current_state);
+            if (state_anim) {
+                s_current_anim = state_anim;
+                s_current_frame = 0;
+            }
+            s_behav_state = BEHAV_IDLE;
+            s_state_visuals_dirty = true;  // re-trigger ZZZ show/hide after transition
+            ESP_LOGI(TAG, "Transition complete: %s", pw_agent_state_to_string(s_current_state));
+        } else {
+            // Pick facing direction toward target
+            if (abs(dx) > abs(dy)) {
+                s_facing = dx > 0 ? DIR_RIGHT : DIR_LEFT;
+            } else {
+                s_facing = dy > 0 ? DIR_DOWN : DIR_UP;
+            }
+            set_anim_by_name("walk", s_facing);
+
+            // Move toward target at transition speed
+            int speed = 20;  // slightly faster than normal walk
+            if (abs(dx) > abs(dy)) {
+                s_pos_x10 += (dx > 0 ? speed : -speed);
+                // small y correction
+                if (abs(dy) > 50) s_pos_y10 += (dy > 0 ? speed / 2 : -speed / 2);
+            } else {
+                s_pos_y10 += (dy > 0 ? speed : -speed);
+                if (abs(dx) > 50) s_pos_x10 += (dx > 0 ? speed / 2 : -speed / 2);
+            }
+        }
+        break;
+    }
     }
 }
 
@@ -370,9 +419,16 @@ static void prepare_frame(void)
         [PW_STATE_DOWN]      = true,
     };
 
-    if (FIXED_STATES[s_current_state]) {
+    if (s_behav_state == BEHAV_TRANSITIONING) {
+        // During transition, behavior_tick handles movement toward target
+        behavior_tick();
+    } else if (FIXED_STATES[s_current_state]) {
         s_pos_x10 = CENTER_X * 10;
-        s_pos_y10 = CENTER_Y * 10;
+        if (s_current_state == PW_STATE_SLEEPING || s_current_state == PW_STATE_DOWN) {
+            s_pos_y10 = (CENTER_Y + 40) * 10;
+        } else {
+            s_pos_y10 = (PW_DISPLAY_HEIGHT - SPRITE_HALF - 20) * 10;
+        }
     } else {
         behavior_tick();
     }
@@ -489,8 +545,7 @@ void pw_renderer_init(void)
     s_zzz_label = lv_label_create(s_screen);
     lv_label_set_text(s_zzz_label, "z");
     lv_obj_set_style_text_color(s_zzz_label, lv_color_black(), 0);
-    lv_obj_set_style_text_font(s_zzz_label, &lv_font_montserrat_20, 0);
-    lv_obj_set_pos(s_zzz_label, CENTER_X + 10, CENTER_Y - SPRITE_HALF - 20);
+    lv_obj_set_style_text_font(s_zzz_label, &lv_font_montserrat_28, 0);
     lv_obj_add_flag(s_zzz_label, LV_OBJ_FLAG_HIDDEN);
 
     ESP_LOGI(TAG, "Screen children: %u", (unsigned)lv_obj_get_child_cnt(s_screen));
@@ -549,8 +604,8 @@ bool pw_renderer_load_character(const char *character_id)
         ESP_LOGI(TAG, "Background tiles found at %s/%s/bg/", PW_SD_CHARACTER_DIR, character_id);
 
         // Pre-load initial background before Himax starts
-        if (load_background_tile(1)) {
-            s_current_bg_idx = 1;
+        if (load_background_tile(16)) {
+            s_current_bg_idx = 16;
             lvgl_port_lock(0);
             if (s_bg_img) {
                 lv_img_set_src(s_bg_img, &s_bg_dsc);
@@ -649,30 +704,87 @@ static void renderer_task(void *arg)
         }
 
         // --- Process pending state change (no LVGL lock needed for behavior) ---
-        static bool s_bg_color_dirty = false;
         if (s_state_changed) {
             s_state_changed = false;
-            s_current_state = s_pending_state;
-            s_behav_state = BEHAV_IDLE;
-            s_state_timer = 0;
+            pw_agent_state_t new_state = s_pending_state;
 
-            // Fixed states use their dedicated animation; idle/wandering states use idle facing
-            const pw_animation_t *state_anim = pw_sprite_get_state_anim(&s_sprite, s_current_state);
-            if (state_anim) {
-                s_current_anim = state_anim;
-                s_current_frame = 0;
+            // Check if new state is fixed-position (needs transition walk)
+            static const bool FIXED_POS_STATES[] = {
+                [PW_STATE_IDLE] = false, [PW_STATE_WORKING] = true,
+                [PW_STATE_WAITING] = true, [PW_STATE_ALERT] = true,
+                [PW_STATE_GREETING] = true, [PW_STATE_SLEEPING] = true,
+                [PW_STATE_REPORTING] = true, [PW_STATE_DOWN] = true,
+            };
+
+            if (FIXED_POS_STATES[new_state] && s_current_state == PW_STATE_IDLE) {
+                // Calculate target position for new state
+                s_target_x10 = CENTER_X * 10;
+                if (new_state == PW_STATE_SLEEPING || new_state == PW_STATE_DOWN) {
+                    s_target_y10 = (CENTER_Y + 40) * 10;
+                } else {
+                    s_target_y10 = (PW_DISPLAY_HEIGHT - SPRITE_HALF - 20) * 10;
+                }
+
+                // Start transition walk — don't apply state yet
+                s_transition_target_state = new_state;
+                s_behav_state = BEHAV_TRANSITIONING;
+                s_state_timer = 0;
+                ESP_LOGI(TAG, "Transitioning to %s", pw_agent_state_to_string(new_state));
             } else {
-                set_anim_by_name("idle", s_facing);
+                // Immediate state change (non-idle origin or going to idle)
+                s_current_state = new_state;
+                s_behav_state = BEHAV_IDLE;
+                s_state_timer = 0;
+
+                const pw_animation_t *state_anim = pw_sprite_get_state_anim(&s_sprite, s_current_state);
+                if (state_anim) {
+                    s_current_anim = state_anim;
+                    s_current_frame = 0;
+                } else {
+                    set_anim_by_name("idle", s_facing);
+                }
+                ESP_LOGI(TAG, "State visual applied: %s", pw_agent_state_to_string(s_current_state));
             }
 
-            s_bg_color_dirty = true;
-            ESP_LOGI(TAG, "State visual applied: %s", pw_agent_state_to_string(s_current_state));
+            s_state_visuals_dirty = true;
         }
 
-        // Check display sleep timeout
+        // Check pre-sleep and display sleep timeouts
         int64_t now_ms = esp_timer_get_time() / 1000;
-        if (!s_display_sleeping && (now_ms - s_last_activity_ms) >= PW_DISPLAY_SLEEP_TIMEOUT_MS) {
+        int64_t idle_ms = now_ms - s_last_activity_ms;
+
+        // Trigger sleeping state before auto display off
+        static bool s_pre_sleep_triggered = false;
+        if (!s_display_sleeping && !s_pre_sleep_triggered &&
+            idle_ms >= (PW_DISPLAY_SLEEP_TIMEOUT_MS - PW_SLEEP_STATE_BEFORE_MS) &&
+            s_current_state != PW_STATE_SLEEPING) {
+            s_pre_sleep_triggered = true;
+            s_pending_state = PW_STATE_SLEEPING;
+            s_state_changed = true;
+            ESP_LOGI(TAG, "Pre-sleep: switching to sleeping state");
+        }
+
+        // Display off: either auto-timeout OR 15s after sleeping state was set (by API or auto)
+        static int64_t s_sleeping_state_started_ms = 0;
+        if (s_current_state == PW_STATE_SLEEPING && s_sleeping_state_started_ms == 0) {
+            s_sleeping_state_started_ms = now_ms;
+        }
+        if (s_current_state != PW_STATE_SLEEPING) {
+            s_sleeping_state_started_ms = 0;
+        }
+
+        bool auto_sleep = idle_ms >= PW_DISPLAY_SLEEP_TIMEOUT_MS;
+        bool state_sleep = s_sleeping_state_started_ms > 0 &&
+                           (now_ms - s_sleeping_state_started_ms) >= PW_SLEEP_AFTER_STATE_MS;
+
+        if (!s_display_sleeping && (auto_sleep || state_sleep)) {
             display_sleep();
+        }
+
+        // Reset pre-sleep flag when activity resumes
+        if (s_wake_requested) {
+            s_pre_sleep_triggered = false;
+            s_sleeping_state_started_ms = 0;
         }
 
         // --- Single LVGL lock for ALL display operations this frame ---
@@ -702,8 +814,8 @@ static void renderer_task(void *arg)
             commit_frame();
 
             // State change: only update ZZZ overlay (no bg color change — backgrounds handled separately)
-            if (s_bg_color_dirty) {
-                s_bg_color_dirty = false;
+            if (s_state_visuals_dirty) {
+                s_state_visuals_dirty = false;
                 if (s_zzz_label) {
                     if (s_current_state == PW_STATE_SLEEPING) {
                         lv_obj_clear_flag(s_zzz_label, LV_OBJ_FLAG_HIDDEN);
@@ -713,12 +825,15 @@ static void renderer_task(void *arg)
                 }
             }
 
-            // Animate ZZZ text cycle (small label, safe for per-frame updates)
+            // Animate ZZZ text cycle and position (follows sprite)
             if (s_zzz_label && s_current_state == PW_STATE_SLEEPING) {
                 static const char *ZZZ_FRAMES[] = { "z", "z Z", "z Z z", "z Z", "z" };
                 static int s_zzz_tick = 0;
-                int phase = (s_zzz_tick / 15) % 5;  // change every ~1.5 seconds
+                int phase = (s_zzz_tick / 15) % 5;
                 lv_label_set_text_static(s_zzz_label, ZZZ_FRAMES[phase]);
+                // Position above and right of sprite's current position
+                int sprite_y = s_pos_y10 / 10;
+                lv_obj_set_pos(s_zzz_label, CENTER_X + 10, sprite_y - SPRITE_HALF - 30);
                 s_zzz_tick++;
             }
 

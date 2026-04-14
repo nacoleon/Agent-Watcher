@@ -32,7 +32,7 @@ void pw_dialog_init(lv_obj_t *parent)
     // 18% from bottom = 74px, 15% from sides = 62px on 412px display
     s_dialog_container = lv_obj_create(parent);
     lv_obj_set_size(s_dialog_container, 288, 70);
-    lv_obj_align(s_dialog_container, LV_ALIGN_BOTTOM_MID, 0, -74);
+    lv_obj_align(s_dialog_container, LV_ALIGN_TOP_MID, 0, 74);
     lv_obj_set_style_pad_all(s_dialog_container, 8, 0);
     lv_obj_set_style_radius(s_dialog_container, 8, 0);
 

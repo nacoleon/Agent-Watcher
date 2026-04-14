@@ -135,6 +135,7 @@ void app_main(void)
     // [4/7] IO expander + renderer
     bsp_io_expander_init();
     vTaskDelay(pdMS_TO_TICKS(100));
+    bsp_codec_mute_set(true);  // Mute speaker to prevent idle amp pops
     ESP_LOGI(TAG, "[4/7] IO expander ready, LCD powered");
     pw_renderer_init();
     ESP_LOGI(TAG, "[4/7] Renderer initialized");
