@@ -14,6 +14,8 @@ static const char *TAG = "pw_himax";
 
 static bool s_person_present = false;
 static int s_absent_count = 0;
+static volatile bool s_himax_paused = false;
+static sscma_client_handle_t s_client = NULL;
 
 static void process_detection(bool person_detected)
 {
@@ -84,15 +86,39 @@ static void himax_task(void *arg)
     // Wait for Himax to boot (it outputs noise initially)
     vTaskDelay(pdMS_TO_TICKS(3000));
 
+    s_client = client;
+
     // Start continuous inference on the Himax chip
     sscma_client_invoke(client, -1, false, false);
 
     ESP_LOGI(TAG, "Himax detection running");
 
-    // Keep task alive — callbacks handle detection events
+    // Keep task alive — handle pause/resume for SPI arbitration
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (s_himax_paused) {
+            // Stop inference while LCD needs SPI bus
+            sscma_client_break(client);
+            while (s_himax_paused) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
+            // Restart inference
+            sscma_client_invoke(client, -1, false, false);
+            ESP_LOGI(TAG, "Himax resumed");
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
+}
+
+void pw_himax_pause(void)
+{
+    s_himax_paused = true;
+    // Give Himax task time to stop inference
+    vTaskDelay(pdMS_TO_TICKS(150));
+}
+
+void pw_himax_resume(void)
+{
+    s_himax_paused = false;
 }
 
 void pw_himax_task_start(void)

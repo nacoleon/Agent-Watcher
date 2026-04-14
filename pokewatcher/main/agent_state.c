@@ -24,6 +24,7 @@ static const char *STATE_STRINGS[] = {
     [PW_STATE_GREETING]  = "greeting",
     [PW_STATE_SLEEPING]  = "sleeping",
     [PW_STATE_REPORTING] = "reporting",
+    [PW_STATE_DOWN]      = "down",
 };
 
 void pw_agent_state_init(void)

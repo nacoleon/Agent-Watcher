@@ -84,7 +84,6 @@ void pw_dialog_show(const char *text, pw_msg_level_t level)
         lv_obj_set_style_border_color(s_dialog_container, lv_color_hex(LEVEL_COLOR_HEX[level]), 0);
     }
 
-    lv_obj_set_style_opa(s_dialog_container, LV_OPA_COVER, 0);
     lv_obj_clear_flag(s_dialog_container, LV_OBJ_FLAG_HIDDEN);
     s_visible = true;
     s_show_time_ms = now_ms();
@@ -114,13 +113,9 @@ void pw_dialog_tick(void)
 
     int64_t elapsed = now_ms() - s_show_time_ms;
 
-    if (elapsed > PW_DIALOG_DISPLAY_MS + PW_DIALOG_FADE_MS) {
+    // Simple timeout — no per-frame opacity animation (causes SPI flush overload)
+    if (elapsed > PW_DIALOG_DISPLAY_MS) {
         pw_dialog_hide();
-    } else if (elapsed > PW_DIALOG_DISPLAY_MS) {
-        // Fade out over PW_DIALOG_FADE_MS
-        int64_t fade_elapsed = elapsed - PW_DIALOG_DISPLAY_MS;
-        uint8_t opa = (uint8_t)(255 - (fade_elapsed * 255 / PW_DIALOG_FADE_MS));
-        lv_obj_set_style_opa(s_dialog_container, opa, 0);
     }
 }
 

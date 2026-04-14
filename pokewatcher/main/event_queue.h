@@ -20,6 +20,7 @@ typedef enum {
     PW_STATE_GREETING,
     PW_STATE_SLEEPING,
     PW_STATE_REPORTING,
+    PW_STATE_DOWN,
     PW_STATE_COUNT,
 } pw_agent_state_t;
 

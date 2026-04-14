@@ -59,6 +59,9 @@ static bool load_frame_manifest(const char *pokemon_id, pw_sprite_data_t *sprite
         cJSON *loop_j = cJSON_GetObjectItem(anim_item, "loop");
         anim->loop = loop_j ? cJSON_IsTrue(loop_j) : true;
 
+        cJSON *mirror_j = cJSON_GetObjectItem(anim_item, "mirror");
+        anim->mirror = mirror_j ? cJSON_IsTrue(mirror_j) : false;
+
         cJSON *frames_arr = cJSON_GetObjectItem(anim_item, "frames");
         anim->frame_count = 0;
         cJSON *frame_j = NULL;
@@ -69,6 +72,10 @@ static bool load_frame_manifest(const char *pokemon_id, pw_sprite_data_t *sprite
             if (!fx || !fy) continue;
             anim->frames[anim->frame_count].x = (uint16_t)fx->valuedouble;
             anim->frames[anim->frame_count].y = (uint16_t)fy->valuedouble;
+            cJSON *fw_j = cJSON_GetObjectItem(frame_j, "w");
+            cJSON *fh_j = cJSON_GetObjectItem(frame_j, "h");
+            anim->frames[anim->frame_count].w = fw_j ? (uint16_t)fw_j->valuedouble : 0;
+            anim->frames[anim->frame_count].h = fh_j ? (uint16_t)fh_j->valuedouble : 0;
             anim->frame_count++;
         }
         sprite->animation_count++;
@@ -82,6 +89,7 @@ static bool load_frame_manifest(const char *pokemon_id, pw_sprite_data_t *sprite
         [PW_STATE_GREETING]  = "greeting",
         [PW_STATE_SLEEPING]  = "sleeping",
         [PW_STATE_REPORTING] = "reporting",
+        [PW_STATE_DOWN]      = "down",
     };
     for (int i = 0; i < PW_STATE_COUNT; i++) {
         strncpy(sprite->state_anim_names[i], state_anim_map[i], PW_ANIM_NAME_LEN - 1);
@@ -176,10 +184,19 @@ uint8_t *pw_sprite_extract_frame_scaled(const pw_sprite_data_t *sprite,
                                          const pw_frame_coord_t *coord,
                                          uint16_t scale)
 {
+    return pw_sprite_extract_frame_scaled_ex(sprite, coord, scale, false);
+}
+
+uint8_t *pw_sprite_extract_frame_scaled_ex(const pw_sprite_data_t *sprite,
+                                            const pw_frame_coord_t *coord,
+                                            uint16_t scale, bool mirror)
+{
     if (!sprite->sprite_sheet_data) return NULL;
 
-    uint16_t dst_w = sprite->frame_width * scale;
-    uint16_t dst_h = sprite->frame_height * scale;
+    uint16_t src_w = coord->w > 0 ? coord->w : sprite->frame_width;
+    uint16_t src_h = coord->h > 0 ? coord->h : sprite->frame_height;
+    uint16_t dst_w = src_w * scale;
+    uint16_t dst_h = src_h * scale;
     size_t buf_size = dst_w * dst_h * 3;  // 3 bytes per pixel
 
     uint8_t *buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
@@ -191,7 +208,9 @@ uint8_t *pw_sprite_extract_frame_scaled(const pw_sprite_data_t *sprite,
         uint16_t sy = coord->y + (dy / scale);
         if (sy >= sprite->sheet_height) sy = sprite->sheet_height - 1;
         for (uint16_t dx = 0; dx < dst_w; dx++) {
-            uint16_t sx = coord->x + (dx / scale);
+            // Mirror: read from opposite x within the frame
+            uint16_t src_dx = mirror ? (dst_w - 1 - dx) : dx;
+            uint16_t sx = coord->x + (src_dx / scale);
             if (sx >= sprite->sheet_width) sx = sprite->sheet_width - 1;
             uint16_t px = sheet[sy * sprite->sheet_width + sx];
             size_t idx = (dy * dst_w + dx) * 3;

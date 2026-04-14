@@ -104,26 +104,13 @@
             return { x: BG_COL_STARTS[col], y: BG_ROW_STARTS[row] };
         }
 
-        const STATE_BGS = {
-            // Peaceful greens, fields, meadows, calm nature
-            idle:      [2, 5, 10, 11, 15, 27, 42, 50, 70, 71, 75, 25],
-            // Interiors, castles, structured spaces, active feel
-            working:   [26, 30, 31, 37, 44, 46, 33, 81, 20, 41, 12, 59],
-            // Skies, clouds, ethereal, cool blues, patient
-            waiting:   [28, 32, 36, 45, 54, 55, 66, 68, 79, 83, 6, 75],
-            // Fire, lava, red/warm, danger, dark dramatic
-            alert:     [8, 13, 38, 39, 48, 53, 56, 58, 60, 61, 76, 29],
-            // Bright, warm, cheerful, golden, welcoming
-            greeting:  [1, 6, 17, 29, 40, 49, 51, 52, 64, 72, 74, 50],
-            // Dark, night, deep blues, tranquil, moonlit
-            sleeping:  [3, 4, 24, 33, 34, 35, 43, 47, 62, 63, 69, 77],
-            // Formal, temples, grand halls, structured
-            reporting: [7, 12, 16, 20, 41, 57, 59, 78, 80, 10, 46, 83],
-        };
+        // Curated backgrounds — single pool, rotate every 5 minutes, same for all states
+        const ALL_BGS = [1,2,3,4,5,6,7,8,10,11,12,13,15,16,17,20,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,66,68,69,70,71,72,74,75,76,77,78,79,80,81,83];
+        const BG_ROTATE_MS = 5 * 60 * 1000;  // 5 minutes
+        let lastBgRotateTime = 0;
 
         let bgSheetImg = null;
         let currentBgIdx = 0;
-        let lastBgChangeState = '';
 
         const DIRS = ['down', 'up', 'left', 'right'];
         const DIR_VEC = { down: {x:0,y:1}, up: {x:0,y:-1}, left: {x:-1,y:0}, right: {x:1,y:0} };
@@ -253,16 +240,14 @@
             const DIALOG_STATES = ['alert', 'greeting', 'reporting'];
             const hasDialog = DIALOG_STATES.includes(currentState);
 
-            // Background: use sprite sheet BG if loaded, fallback to solid color
-            if (bgSheetImg && STATE_BGS[currentState]) {
-                // Pick a new BG when state changes
-                if (currentState !== lastBgChangeState) {
-                    const bgs = STATE_BGS[currentState];
-                    currentBgIdx = bgs[Math.floor(Math.random() * bgs.length)];
-                    lastBgChangeState = currentState;
+            // Background: rotate every 5 minutes from curated pool
+            const now = Date.now();
+            if (bgSheetImg && ALL_BGS.length > 0) {
+                if (lastBgRotateTime === 0 || (now - lastBgRotateTime) >= BG_ROTATE_MS) {
+                    currentBgIdx = ALL_BGS[Math.floor(Math.random() * ALL_BGS.length)];
+                    lastBgRotateTime = now;
                 }
                 const bp = bgPos(currentBgIdx);
-                // Draw background scaled to fill canvas
                 ctx.drawImage(bgSheetImg, bp.x, bp.y, BG_CELL_W, BG_CELL_H, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
             } else {
                 ctx.fillStyle = b.bgColor;

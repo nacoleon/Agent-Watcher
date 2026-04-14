@@ -12,6 +12,8 @@
 typedef struct {
     uint16_t x;
     uint16_t y;
+    uint16_t w;  // 0 = use default frame_width
+    uint16_t h;  // 0 = use default frame_height
 } pw_frame_coord_t;
 
 typedef struct {
@@ -19,6 +21,7 @@ typedef struct {
     pw_frame_coord_t frames[PW_MAX_FRAMES_PER_ANIM];
     int frame_count;
     bool loop;
+    bool mirror;
 } pw_animation_t;
 
 typedef struct {
@@ -37,5 +40,6 @@ void pw_sprite_free(pw_sprite_data_t *sprite);
 const pw_animation_t *pw_sprite_get_state_anim(const pw_sprite_data_t *sprite, pw_agent_state_t state);
 const pw_animation_t *pw_sprite_get_anim_by_name(const pw_sprite_data_t *sprite, const char *name);
 uint8_t *pw_sprite_extract_frame_scaled(const pw_sprite_data_t *sprite, const pw_frame_coord_t *coord, uint16_t scale);
+uint8_t *pw_sprite_extract_frame_scaled_ex(const pw_sprite_data_t *sprite, const pw_frame_coord_t *coord, uint16_t scale, bool mirror);
 
 #endif

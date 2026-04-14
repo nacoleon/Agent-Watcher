@@ -48,6 +48,7 @@ static const uint32_t STATE_BG_COLORS[] = {
     [PW_STATE_GREETING]  = 0xFFF0C0,
     [PW_STATE_SLEEPING]  = 0x404060,
     [PW_STATE_REPORTING] = 0xFDE8C8,
+    [PW_STATE_DOWN]      = 0x2A2A2A,  // Dark gray
 };
 
 // --- Background indices per state (matching dashboard) ---
@@ -164,6 +165,7 @@ static const mood_behavior_t STATE_BEHAVIORS[] = {
     [PW_STATE_GREETING]  = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
     [PW_STATE_SLEEPING]  = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
     [PW_STATE_REPORTING] = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
+    [PW_STATE_DOWN]      = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
 };
 
 // Position in display pixels (fixed-point x10 for sub-pixel movement)
@@ -175,6 +177,7 @@ static int s_state_timer = 0;
 static int s_walk_steps_left = 0;
 static int s_pause_target = 0;
 static int s_frame_tick = 0;
+static facing_dir_t s_last_walk_dir = DIR_DOWN;  // anti-reversal tracking
 
 // Display sleep
 static bool s_display_sleeping = false;
@@ -244,6 +247,11 @@ static void set_anim_by_name(const char *prefix, facing_dir_t dir)
     }
 }
 
+static const facing_dir_t OPPOSITE_DIR[] = {
+    [DIR_DOWN] = DIR_UP, [DIR_UP] = DIR_DOWN,
+    [DIR_LEFT] = DIR_RIGHT, [DIR_RIGHT] = DIR_LEFT,
+};
+
 static void pick_walk_dir(void)
 {
     // Prefer walking toward center if far away
@@ -259,8 +267,15 @@ static void pick_walk_dir(void)
             s_facing = dy > 0 ? DIR_DOWN : DIR_UP;
         }
     } else {
-        s_facing = (facing_dir_t)(simple_rand() % 4);
+        // Pick random direction but never the opposite of last walk
+        facing_dir_t opposite = OPPOSITE_DIR[s_last_walk_dir];
+        facing_dir_t choice;
+        do {
+            choice = (facing_dir_t)(simple_rand() % 4);
+        } while (choice == opposite);
+        s_facing = choice;
     }
+    s_last_walk_dir = s_facing;
 }
 
 static void behavior_tick(void)
@@ -271,13 +286,7 @@ static void behavior_tick(void)
     switch (s_behav_state) {
     case BEHAV_IDLE:
         set_anim_by_name("idle", s_facing);
-        if (rand_chance(b->turn_chance)) {
-            s_facing = (facing_dir_t)(simple_rand() % 4);
-            set_anim_by_name("idle", s_facing);
-            s_behav_state = BEHAV_PAUSING;
-            s_state_timer = 0;
-            s_pause_target = rand_range(b->pause_min, b->pause_max);
-        } else if (rand_chance(b->walk_chance)) {
+        if (rand_chance(b->walk_chance)) {
             pick_walk_dir();
             s_walk_steps_left = rand_range(b->walk_steps_min, b->walk_steps_max);
             s_behav_state = BEHAV_WALKING;
@@ -350,12 +359,13 @@ static void prepare_frame(void)
     // States that stay centered — no wandering
     static const bool FIXED_STATES[] = {
         [PW_STATE_IDLE]      = false,
-        [PW_STATE_WORKING]   = false,
+        [PW_STATE_WORKING]   = true,
         [PW_STATE_WAITING]   = true,
         [PW_STATE_ALERT]     = true,
         [PW_STATE_GREETING]  = true,
         [PW_STATE_SLEEPING]  = true,
         [PW_STATE_REPORTING] = true,
+        [PW_STATE_DOWN]      = true,
     };
 
     if (FIXED_STATES[s_current_state]) {
@@ -372,11 +382,13 @@ static void prepare_frame(void)
         s_frame_buf = NULL;
     }
 
-    s_frame_buf = pw_sprite_extract_frame_scaled(&s_sprite, coord, PW_SPRITE_SCALE);
+    s_frame_buf = pw_sprite_extract_frame_scaled_ex(&s_sprite, coord, PW_SPRITE_SCALE, s_current_anim->mirror);
     if (!s_frame_buf) { s_frame_ready = false; return; }
 
-    uint16_t scaled_w = s_sprite.frame_width * PW_SPRITE_SCALE;
-    uint16_t scaled_h = s_sprite.frame_height * PW_SPRITE_SCALE;
+    uint16_t src_w = coord->w > 0 ? coord->w : s_sprite.frame_width;
+    uint16_t src_h = coord->h > 0 ? coord->h : s_sprite.frame_height;
+    uint16_t scaled_w = src_w * PW_SPRITE_SCALE;
+    uint16_t scaled_h = src_h * PW_SPRITE_SCALE;
 
     s_frame_dsc.header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA;
     s_frame_dsc.header.always_zero = 0;
@@ -590,7 +602,16 @@ static void renderer_task(void *arg)
             s_current_state = s_pending_state;
             s_behav_state = BEHAV_IDLE;
             s_state_timer = 0;
-            set_anim_by_name("idle", s_facing);
+
+            // Fixed states use their dedicated animation; idle/wandering states use idle facing
+            const pw_animation_t *state_anim = pw_sprite_get_state_anim(&s_sprite, s_current_state);
+            if (state_anim) {
+                s_current_anim = state_anim;
+                s_current_frame = 0;
+            } else {
+                set_anim_by_name("idle", s_facing);
+            }
+
             s_bg_color_dirty = true;
             ESP_LOGI(TAG, "State visual applied: %s", pw_agent_state_to_string(s_current_state));
         }
@@ -606,17 +627,20 @@ static void renderer_task(void *arg)
             // Phase 1: CPU work outside LVGL lock (behavior, sprite extraction)
             prepare_frame();
 
+            if (!s_frame_ready) {
+                ESP_LOGW(TAG, "Frame not ready, skipping commit");
+                vTaskDelay(frame_delay);
+                continue;
+            }
+
             // Phase 2: single LVGL lock for ALL widget updates
             lvgl_port_lock(0);
 
             commit_frame();
 
-            // Apply pending bg color change (only when state changed)
-            if (s_bg_color_dirty && s_screen) {
+            // State change: only update ZZZ overlay (no bg color change — backgrounds handled separately)
+            if (s_bg_color_dirty) {
                 s_bg_color_dirty = false;
-                lv_obj_set_style_bg_color(s_screen, lv_color_hex(STATE_BG_COLORS[s_current_state]), 0);
-
-                // Show/hide ZZZ overlay
                 if (s_zzz_label) {
                     if (s_current_state == PW_STATE_SLEEPING) {
                         lv_obj_clear_flag(s_zzz_label, LV_OBJ_FLAG_HIDDEN);
@@ -626,10 +650,10 @@ static void renderer_task(void *arg)
                 }
             }
 
-            // Apply pending message
+            // Apply pending message — DISABLED: dialog causes LCD freeze
             if (s_msg_pending) {
                 s_msg_pending = false;
-                pw_dialog_show(s_pending_msg, s_pending_msg_level);
+                ESP_LOGI(TAG, "Message received (dialog disabled): %s", s_pending_msg);
             }
 
             // Tick dialog auto-dismiss
