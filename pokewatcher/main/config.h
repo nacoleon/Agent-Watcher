@@ -14,7 +14,7 @@
 #define PW_ALERT_TIMEOUT_MS      60000   // 60 seconds
 
 // Dialog
-#define PW_DIALOG_MAX_TEXT     81
+#define PW_DIALOG_MAX_TEXT     161  // ~5 lines at 260px wide, Montserrat 14
 #define PW_DIALOG_DISPLAY_MS   10000   // 10 seconds
 #define PW_DIALOG_FADE_MS      500
 

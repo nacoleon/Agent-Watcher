@@ -889,10 +889,18 @@ static void renderer_task(void *arg)
 
             // Phase 2: single LVGL lock for ALL widget updates
             // Use 500ms timeout instead of wait-forever to recover from SPI flush stalls
+            static int s_frame_counter = 0;
+            s_frame_counter++;
+
+            int64_t lock_start = esp_timer_get_time() / 1000;
             if (!lvgl_port_lock(500)) {
-                ESP_LOGW(TAG, "LVGL lock timeout — skipping frame (SPI flush may be stalled)");
+                ESP_LOGW(TAG, "LVGL lock TIMEOUT frame=%d (SPI flush stalled?)", s_frame_counter);
                 vTaskDelay(frame_delay);
                 continue;
+            }
+            int64_t lock_acquired = esp_timer_get_time() / 1000;
+            if (lock_acquired - lock_start > 50) {
+                ESP_LOGW(TAG, "LVGL lock SLOW: %dms frame=%d", (int)(lock_acquired - lock_start), s_frame_counter);
             }
 
             commit_frame();
@@ -924,13 +932,33 @@ static void renderer_task(void *arg)
             // Apply pending message
             if (s_msg_pending) {
                 s_msg_pending = false;
+                ESP_LOGI(TAG, ">>> DIALOG SHOW start frame=%d", s_frame_counter);
                 pw_dialog_show(s_pending_msg, s_pending_msg_level);
+                ESP_LOGI(TAG, ">>> DIALOG SHOW done frame=%d", s_frame_counter);
             }
 
-            // Tick dialog auto-dismiss
+            // Tick dialog auto-dismiss/typewriter
             pw_dialog_tick();
 
+            int64_t before_unlock = esp_timer_get_time() / 1000;
             lvgl_port_unlock();
+            int64_t after_unlock = esp_timer_get_time() / 1000;
+
+            // Log if unlock (which triggers SPI flush) takes too long
+            int64_t lock_held_ms = before_unlock - lock_acquired;
+            int64_t unlock_ms = after_unlock - before_unlock;
+            if (lock_held_ms > 20 || unlock_ms > 50) {
+                ESP_LOGW(TAG, "FRAME SLOW: frame=%d lock_held=%dms unlock=%dms dialog=%d typing=%d",
+                    s_frame_counter, (int)lock_held_ms, (int)unlock_ms,
+                    pw_dialog_is_visible(), s_msg_pending);
+            }
+
+            // Periodic alive log
+            if (s_frame_counter % 100 == 0) {
+                ESP_LOGI(TAG, "ALIVE frame=%d state=%s dialog=%d",
+                    s_frame_counter, pw_agent_state_to_string(s_current_state),
+                    pw_dialog_is_visible());
+            }
         }
 
         vTaskDelay(s_display_sleeping ? pdMS_TO_TICKS(1000) : frame_delay);
