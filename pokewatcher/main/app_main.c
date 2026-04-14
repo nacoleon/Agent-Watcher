@@ -157,7 +157,7 @@ void app_main(void)
     pw_agent_state_set_change_cb(on_state_changed);
 
     // Start tasks
-    pw_himax_task_start();
+    // pw_himax_task_start();  // DISABLED: causes SPI collision with LCD (confirmed via diagnostic logs)
     pw_agent_state_task_start();
     pw_renderer_task_start();
 

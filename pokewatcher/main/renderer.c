@@ -31,6 +31,7 @@ static bool s_bg_available = false;
 static char s_bg_path[300] = "";
 static bool s_bg_needs_load = false;
 static int s_bg_pending_idx = -1;
+static int s_current_bg_idx = -1;
 
 static pw_sprite_data_t s_sprite = {};
 static pw_agent_state_t s_current_state = PW_STATE_IDLE;
@@ -109,7 +110,8 @@ static bool load_background_tile(int bg_idx)
         int sy = dy * th / PW_DISPLAY_HEIGHT;
         for (int dx = 0; dx < PW_DISPLAY_WIDTH; dx++) {
             int sx = dx * tw / PW_DISPLAY_WIDTH;
-            dst[dy * PW_DISPLAY_WIDTH + dx] = tile_buf[sy * tw + sx];
+            uint16_t px = tile_buf[sy * tw + sx];
+            dst[dy * PW_DISPLAY_WIDTH + dx] = (px >> 8) | (px << 8);  // byte-swap for LV_COLOR_16_SWAP
         }
     }
     heap_caps_free(tile_buf);
@@ -473,6 +475,12 @@ void pw_renderer_init(void)
     // Remove all children from default screen (theme may have added some)
     lv_obj_clean(s_screen);
 
+    // Background image (behind sprite, hidden until loaded)
+    s_bg_img = lv_img_create(s_screen);
+    lv_obj_remove_style_all(s_bg_img);
+    lv_obj_set_pos(s_bg_img, 0, 0);
+    lv_obj_add_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
+
     s_sprite_img = lv_img_create(s_screen);
     lv_obj_remove_style_all(s_sprite_img);
     lv_obj_set_pos(s_sprite_img, CENTER_X - SPRITE_HALF, CENTER_Y - SPRITE_HALF);
@@ -539,6 +547,18 @@ bool pw_renderer_load_character(const char *character_id)
         fclose(bf);
         s_bg_available = true;
         ESP_LOGI(TAG, "Background tiles found at %s/%s/bg/", PW_SD_CHARACTER_DIR, character_id);
+
+        // Pre-load initial background before Himax starts
+        if (load_background_tile(1)) {
+            s_current_bg_idx = 1;
+            lvgl_port_lock(0);
+            if (s_bg_img) {
+                lv_img_set_src(s_bg_img, &s_bg_dsc);
+                lv_obj_clear_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
+            }
+            lvgl_port_unlock();
+            ESP_LOGI(TAG, "Initial background loaded: tile 01");
+        }
     } else {
         s_bg_available = false;
         ESP_LOGW(TAG, "No background tiles found, using solid colors");
@@ -552,6 +572,10 @@ bool pw_renderer_load_character(const char *character_id)
 // Lock-free state change — just set flags, render loop picks them up
 static volatile pw_agent_state_t s_pending_state = PW_STATE_IDLE;
 static volatile bool s_state_changed = false;
+
+// Lock-free background change
+static volatile int s_pending_bg_idx = -1;
+static volatile bool s_bg_change_requested = false;
 static volatile bool s_wake_requested = false;
 
 // Pending message
@@ -581,6 +605,19 @@ void pw_renderer_wake_display(void)
     s_wake_requested = true;
 }
 
+void pw_renderer_set_background(int bg_idx)
+{
+    s_pending_bg_idx = bg_idx;
+    s_bg_change_requested = true;
+    s_wake_requested = true;
+    ESP_LOGI(TAG, "Background change queued: %d", bg_idx);
+}
+
+int pw_renderer_get_background(void)
+{
+    return s_current_bg_idx;
+}
+
 static void renderer_task(void *arg)
 {
     ESP_LOGI(TAG, "Renderer task started");
@@ -592,6 +629,23 @@ static void renderer_task(void *arg)
         if (s_wake_requested) {
             s_wake_requested = false;
             display_wake();
+        }
+
+        // --- Process pending background change (file I/O outside LVGL lock) ---
+        if (s_bg_change_requested) {
+            s_bg_change_requested = false;
+            int new_idx = s_pending_bg_idx;
+            if (new_idx != s_current_bg_idx && load_background_tile(new_idx)) {
+                s_current_bg_idx = new_idx;
+                // lv_img_set_src is a small update — safe inside LVGL lock
+                lvgl_port_lock(0);
+                if (s_bg_img) {
+                    lv_img_set_src(s_bg_img, &s_bg_dsc);
+                    lv_obj_clear_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
+                }
+                lvgl_port_unlock();
+                ESP_LOGI(TAG, "Background changed to tile %d", new_idx);
+            }
         }
 
         // --- Process pending state change (no LVGL lock needed for behavior) ---
@@ -630,6 +684,16 @@ static void renderer_task(void *arg)
                 ESP_LOGW(TAG, "Frame not ready, skipping commit");
                 vTaskDelay(frame_delay);
                 continue;
+            }
+
+            // Log heap every 100 frames to detect leaks
+            static int s_heap_log_counter = 0;
+            if (++s_heap_log_counter >= 100) {
+                s_heap_log_counter = 0;
+                ESP_LOGI(TAG, "HEAP: free=%u largest=%u PSRAM_free=%u",
+                    (unsigned)esp_get_free_heap_size(),
+                    (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+                    (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
             }
 
             // Phase 2: single LVGL lock for ALL widget updates

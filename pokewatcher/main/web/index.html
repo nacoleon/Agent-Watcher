@@ -54,6 +54,14 @@
         <button onclick="sendMsg()">Send</button>
     </div>
 
+    <h2>Background</h2>
+    <div class="msg-row">
+        <input id="bg-idx" type="number" min="1" max="83" value="1" style="width:60px;flex:none;">
+        <button onclick="setBg()">Set</button>
+        <button onclick="setBg('prev')">Prev</button>
+        <button onclick="setBg('next')">Next</button>
+    </div>
+
     <button class="reboot" onclick="reboot()">Reboot Watcher</button>
 
     <script>
@@ -81,6 +89,15 @@
             poll();
         }
         document.getElementById('txt').addEventListener('keypress', e => { if (e.key === 'Enter') sendMsg(); });
+
+        async function setBg(dir) {
+            const inp = document.getElementById('bg-idx');
+            let idx = parseInt(inp.value) || 1;
+            if (dir === 'prev') idx = Math.max(1, idx - 1);
+            if (dir === 'next') idx = Math.min(83, idx + 1);
+            inp.value = idx;
+            await fetch('/api/background', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({index:idx}) });
+        }
 
         async function reboot() {
             if (!confirm('Reboot the Watcher?')) return;
