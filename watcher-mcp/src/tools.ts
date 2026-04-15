@@ -96,14 +96,9 @@ export function registerTools(server: McpServer): void {
     },
     async ({ state, text, level }: { state: string; text: string; level: string }) => {
       try {
-        await watcher.setState(state);
+        return ok(await enqueue(text, level, state));
       } catch (err: any) {
-        return error(`Failed to set state: ${err.message}`);
-      }
-      try {
-        return ok(await enqueue(text, level));
-      } catch (err: any) {
-        return error(`State set to ${state}, but message failed: ${err.message}`);
+        return error(err.message);
       }
     }
   );
