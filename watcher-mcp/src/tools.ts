@@ -2,6 +2,7 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { VALID_STATES } from "./config.js";
 import * as watcher from "./watcher-client.js";
+import { enqueue, getQueueState } from "./queue.js";
 
 function error(msg: string) {
   return { content: [{ type: "text" as const, text: msg }], isError: true };
@@ -18,7 +19,9 @@ export function registerTools(server: McpServer): void {
       title: "Display Message",
       description:
         "Show a message in the FF9 dialog box on the Watcher display. " +
-        "Max 1000 chars, paginated at 80 chars/page on device.",
+        "Max 1000 chars, paginated at 80 chars/page on device. " +
+        "Messages queue if dialog is already showing. " +
+        "You'll receive a 'message_read' notification when dismissed.",
       inputSchema: {
         text: z.string().max(1000).describe("Message text to display"),
         level: z
@@ -29,9 +32,9 @@ export function registerTools(server: McpServer): void {
     },
     async ({ text, level }: { text: string; level: string }) => {
       try {
-        return ok(await watcher.sendMessage(text, level));
+        return ok(await enqueue(text, level));
       } catch (err: any) {
-        return error(`Watcher error: ${err.message}`);
+        return error(err.message);
       }
     }
   );
@@ -63,7 +66,7 @@ export function registerTools(server: McpServer): void {
     {
       title: "Get Watcher Status",
       description:
-        "Read current Watcher state: agent_state, person_present, uptime, wifi signal.",
+        "Read current Watcher state: agent_state, person_present, uptime, wifi signal, dialog_visible.",
     },
     async () => {
       try {
@@ -79,7 +82,7 @@ export function registerTools(server: McpServer): void {
     {
       title: "Notify",
       description:
-        "Convenience: set agent state and show a message in one call.",
+        "Convenience: set agent state immediately, then queue a message for display.",
       inputSchema: {
         state: z
           .enum(VALID_STATES)
@@ -98,10 +101,22 @@ export function registerTools(server: McpServer): void {
         return error(`Failed to set state: ${err.message}`);
       }
       try {
-        return ok(await watcher.sendMessage(text, level));
+        return ok(await enqueue(text, level));
       } catch (err: any) {
         return error(`State set to ${state}, but message failed: ${err.message}`);
       }
+    }
+  );
+
+  server.registerTool(
+    "get_queue",
+    {
+      title: "Get Message Queue",
+      description:
+        "Check the message queue: whether a message is currently showing, and what's pending.",
+    },
+    async () => {
+      return ok(getQueueState());
     }
   );
 
