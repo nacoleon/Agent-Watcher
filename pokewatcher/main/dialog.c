@@ -274,11 +274,6 @@ void pw_dialog_tick(void)
         s_knob_prev = false;
         pw_dialog_prev_page();
     }
-
-    int64_t elapsed = now_ms() - s_show_time_ms;
-    if (elapsed > PW_DIALOG_DISPLAY_MS) {
-        pw_dialog_hide();
-    }
 }
 
 bool pw_dialog_consume_btn_wake(void)
