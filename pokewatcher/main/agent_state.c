@@ -80,14 +80,6 @@ void pw_agent_state_set_person_present(bool present)
 
 void pw_agent_state_tick(void)
 {
-    int64_t elapsed = now_ms() - s_state.state_entered_at_ms;
-
-    if (s_state.current_state == PW_STATE_GREETING && elapsed > PW_GREETING_TIMEOUT_MS) {
-        pw_agent_state_set(PW_STATE_IDLE);
-    }
-    if (s_state.current_state == PW_STATE_ALERT && elapsed > PW_ALERT_TIMEOUT_MS) {
-        pw_agent_state_set(PW_STATE_IDLE);
-    }
 }
 
 void pw_agent_state_set_change_cb(pw_state_change_cb_t cb)
