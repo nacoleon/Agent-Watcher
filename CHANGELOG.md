@@ -5,6 +5,20 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 ## [Unreleased]
 
 ### Added
+- **Watcher MCP server**: Stdio MCP server replaces the Express HTTP bridge for OpenClaw integration. Zidane auto-discovers `watcher__*` tools (display_message, set_state, get_status, notify, reboot) via MCP protocol instead of manual TOOLS.md definitions.
+- **MCP presence notifications**: 5-second poller with 2-poll debounce pushes `person_arrived`/`person_left` log messages to Zidane via MCP, replacing file-based polling (`watcher-context.json`/`watcher-events.json`).
+- **MCP status resource**: `watcher://status` resource exposes live device state (agent_state, person_present, uptime, wifi_rssi).
+- **Tool error handling**: All MCP tool handlers return descriptive `isError` responses when Watcher is offline. Notify tool reports partial failures (state set but message failed).
+- **Background index in status API**: `/api/status` now returns current background index, web UI syncs the background picker from it.
+
+### Changed
+- **OpenClaw integration**: Moved from manual HTTP bridge (Express on port 3847) to native MCP server (stdio transport, spawned by OpenClaw gateway). LaunchAgent `ai.openclaw.watcher-bridge` retired.
+- **TOOLS.md**: Removed manual watcher tool definitions — now auto-discovered via MCP.
+- **HEARTBEAT.md**: Updated Desk Context section to use MCP presence notifications instead of file polling.
+
+## [Previous Unreleased]
+
+### Added
 - **Wakeup animation**: 7-frame non-looping sequence (laying down → kneeling → standing) plays automatically when display wakes from off before any queued state applies
 - **PW_STATE_WAKEUP**: New agent state with wakeup button in web UI, purple badge, mapped to "wakeup" animation in frames.json
 - **Wakeup state queue**: When display wakes from off, pending state changes are queued and applied after wakeup animation completes

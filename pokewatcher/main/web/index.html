@@ -58,7 +58,7 @@
 
     <h2>Background</h2>
     <div class="msg-row">
-        <input id="bg-idx" type="number" min="1" max="83" value="1" style="width:60px;flex:none;">
+        <input id="bg-idx" type="number" min="1" max="83" value="16" style="width:60px;flex:none;">
         <button onclick="setBg()">Set</button>
         <button onclick="setBg('prev')">Prev</button>
         <button onclick="setBg('next')">Next</button>
@@ -126,6 +126,7 @@
                 document.getElementById('uptime').textContent = fmt(d.uptime_seconds);
                 document.getElementById('rssi').textContent = (d.wifi_rssi || '--') + ' dBm';
                 document.getElementById('msg').textContent = d.last_message || 'None';
+                if (d.background > 0) document.getElementById('bg-idx').value = d.background;
                 document.querySelectorAll('.btns button').forEach(b => b.className = b.textContent === cur ? 'on' : '');
             } catch(e) {}
         }
