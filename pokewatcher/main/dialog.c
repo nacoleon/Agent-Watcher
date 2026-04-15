@@ -1,4 +1,5 @@
 #include "dialog.h"
+#include "renderer.h"
 #include "config.h"
 #include "sensecap-watcher.h"
 #include "iot_knob.h"
@@ -264,6 +265,7 @@ void pw_dialog_tick(void)
         s_knob_pressed = false;
         ESP_LOGI(TAG, "Dialog dismissed by knob press");
         pw_dialog_hide();
+        pw_renderer_set_state(PW_STATE_IDLE);
         return;
     }
     if (s_knob_next) {

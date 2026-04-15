@@ -56,17 +56,12 @@ export async function onPoll(dialogVisible: boolean): Promise<void> {
         // Watcher offline — put message back at front
         queue.unshift(next);
       }
-    } else {
-      // All messages read — return to idle
-      try { await watcher.setState("idle"); } catch {}
-
-      if (server) {
-        await server.sendLoggingMessage({
-          level: "info",
-          logger: "messages",
-          data: "queue_empty",
-        });
-      }
+    } else if (server) {
+      await server.sendLoggingMessage({
+        level: "info",
+        logger: "messages",
+        data: "queue_empty",
+      });
     }
   }
 
