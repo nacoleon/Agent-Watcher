@@ -708,6 +708,12 @@ static void renderer_task(void *arg)
     TickType_t frame_delay = pdMS_TO_TICKS(1000 / PW_ANIM_FPS);
 
     while (1) {
+        // --- Check knob button wake (display off + button press = wake) ---
+        if (s_display_sleeping && pw_dialog_consume_btn_wake()) {
+            s_wake_requested = true;  // feed into the standard wake flow below
+            ESP_LOGI(TAG, "Knob button pressed while display off — waking");
+        }
+
         // --- Process pending wake (no LVGL lock needed) ---
         // NOTE: s_wake_requested is consumed here — do NOT check it later in the loop
         bool woke_this_frame = false;

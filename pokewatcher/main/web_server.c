@@ -116,7 +116,7 @@ static esp_err_t handle_api_agent_state(httpd_req_t *req)
 
 static esp_err_t handle_api_message(httpd_req_t *req)
 {
-    char body[512];
+    char body[1280];
     int ret = recv_full_body(req, body, sizeof(body));
     if (ret <= 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing body");

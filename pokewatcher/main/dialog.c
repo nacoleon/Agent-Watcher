@@ -1,6 +1,10 @@
 #include "dialog.h"
 #include "config.h"
+#include "sensecap-watcher.h"
+#include "iot_knob.h"
+#include "iot_button.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include <string.h>
 
@@ -9,25 +13,50 @@ static const char *TAG = "pw_dialog";
 static lv_obj_t *s_dialog_container = NULL;
 static lv_obj_t *s_dialog_label = NULL;
 static lv_obj_t *s_name_label = NULL;
+static lv_obj_t *s_page_label = NULL;
 static bool s_visible = false;
 static int64_t s_show_time_ms = 0;
 static char s_last_text[PW_DIALOG_MAX_TEXT] = "";
 
-// Typewriter effect state
+// Pagination state
 static char s_full_text[PW_DIALOG_MAX_TEXT] = "";
 static int s_full_text_len = 0;
-static int s_revealed_chars = 0;
-static bool s_typing = false;
-#define TYPEWRITER_CHARS_PER_TICK  3  // chars per frame at 10 FPS = 30 chars/sec
+static int s_current_page = 0;
+static int s_total_pages = 0;
+#define CHARS_PER_PAGE  80
 
-// Staged height reveal — grow container gradually to avoid large SPI dirty regions
-// SPI stalls on dirty regions > ~288x70, so we grow in small increments
-#define DIALOG_MIN_HEIGHT    30   // just "Zidane:" label
-#define DIALOG_MAX_HEIGHT    120  // max for ~5 lines
-#define DIALOG_HEIGHT_STEP   10   // pixels per frame growth
-static int s_current_height = DIALOG_MIN_HEIGHT;
-static int s_target_height = DIALOG_MIN_HEIGHT;
-static bool s_growing = false;
+// Knob scroll flags (set from ISR callbacks, consumed in tick)
+static volatile bool s_knob_next = false;
+static volatile bool s_knob_prev = false;
+static volatile bool s_knob_pressed = false;
+static knob_handle_t s_knob_handle = NULL;
+static button_handle_t s_btn_handle = NULL;
+
+static void knob_left_cb(void *arg, void *data)
+{
+    s_knob_prev = true;
+}
+
+static void knob_right_cb(void *arg, void *data)
+{
+    s_knob_next = true;
+}
+
+static volatile bool s_knob_long_pressed = false;
+
+// Exposed for renderer to detect button press while display is off
+static volatile bool s_btn_wake_requested = false;
+
+static void knob_btn_cb(void *arg, void *data)
+{
+    s_knob_pressed = true;
+    s_btn_wake_requested = true;
+}
+
+static void knob_btn_long_cb(void *arg, void *data)
+{
+    s_knob_long_pressed = true;
+}
 
 // Border colors per message level
 static const uint32_t LEVEL_COLOR_HEX[] = {
@@ -42,22 +71,40 @@ static int64_t now_ms(void)
     return esp_timer_get_time() / 1000;
 }
 
-// Estimate target height from text length (Montserrat 14 at 260px width ≈ 20 chars/line, 18px/line)
-static int estimate_height(int text_len)
+static void update_page_indicator(void)
 {
-    int lines = (text_len + 19) / 20;  // ~20 chars per line at Montserrat 14
-    if (lines < 1) lines = 1;
-    int h = 28 + lines * 18;  // 28px for "Zidane:" header + padding, 18px per text line
-    if (h < DIALOG_MIN_HEIGHT) h = DIALOG_MIN_HEIGHT;
-    if (h > DIALOG_MAX_HEIGHT) h = DIALOG_MAX_HEIGHT;
-    return h;
+    if (!s_page_label) return;
+    if (s_total_pages <= 1) {
+        lv_obj_add_flag(s_page_label, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "%d/%d", s_current_page + 1, s_total_pages);
+        lv_label_set_text(s_page_label, buf);
+        lv_obj_clear_flag(s_page_label, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void show_current_page(void)
+{
+    int start = s_current_page * CHARS_PER_PAGE;
+    int remaining = s_full_text_len - start;
+    if (remaining <= 0) return;
+    int len = remaining > CHARS_PER_PAGE ? CHARS_PER_PAGE : remaining;
+
+    // Temporarily null-terminate at page boundary
+    char saved = s_full_text[start + len];
+    s_full_text[start + len] = '\0';
+    lv_label_set_text(s_dialog_label, &s_full_text[start]);
+    s_full_text[start + len] = saved;
+
+    update_page_indicator();
 }
 
 void pw_dialog_init(lv_obj_t *parent)
 {
     s_dialog_container = lv_obj_create(parent);
-    // Start at min height — will grow when message arrives
-    lv_obj_set_size(s_dialog_container, 288, DIALOG_MIN_HEIGHT);
+    // Fixed 288x88 — text paginated at 80 chars, knob scrolls pages
+    lv_obj_set_size(s_dialog_container, 288, 88);
     lv_obj_align(s_dialog_container, LV_ALIGN_TOP_MID, 0, 74);
     lv_obj_set_style_pad_all(s_dialog_container, 8, 0);
     lv_obj_set_style_radius(s_dialog_container, 8, 0);
@@ -67,9 +114,6 @@ void pw_dialog_init(lv_obj_t *parent)
     lv_obj_set_style_border_color(s_dialog_container, lv_color_hex(0x5566AA), 0);
     lv_obj_set_style_border_width(s_dialog_container, 2, 0);
     lv_obj_clear_flag(s_dialog_container, LV_OBJ_FLAG_SCROLLABLE);
-
-    // Clip children to container bounds — text beyond current height is hidden
-    lv_obj_set_style_clip_corner(s_dialog_container, true, 0);
 
     // Name label: "Zidane:" in green
     s_name_label = lv_label_create(s_dialog_container);
@@ -87,9 +131,48 @@ void pw_dialog_init(lv_obj_t *parent)
     lv_label_set_long_mode(s_dialog_label, LV_LABEL_LONG_WRAP);
     lv_obj_align(s_dialog_label, LV_ALIGN_TOP_LEFT, 4, 20);
 
+    // Page indicator: "1/3" bottom-right, small dim text, hidden when single page
+    s_page_label = lv_label_create(s_dialog_container);
+    lv_label_set_text(s_page_label, "");
+    lv_obj_set_style_text_color(s_page_label, lv_color_hex(0x888888), 0);
+    lv_obj_set_style_text_font(s_page_label, &lv_font_montserrat_14, 0);
+    lv_obj_align(s_page_label, LV_ALIGN_BOTTOM_RIGHT, -2, -2);
+    lv_obj_add_flag(s_page_label, LV_OBJ_FLAG_HIDDEN);
+
     lv_obj_add_flag(s_dialog_container, LV_OBJ_FLAG_HIDDEN);
     s_visible = false;
-    s_current_height = DIALOG_MIN_HEIGHT;
+
+    // Initialize knob for page scrolling
+    const knob_config_t knob_cfg = {
+        .default_direction = 0,
+        .gpio_encoder_a = BSP_KNOB_A,
+        .gpio_encoder_b = BSP_KNOB_B,
+    };
+    s_knob_handle = iot_knob_create(&knob_cfg);
+    if (s_knob_handle) {
+        iot_knob_register_cb(s_knob_handle, KNOB_LEFT, knob_left_cb, NULL);
+        iot_knob_register_cb(s_knob_handle, KNOB_RIGHT, knob_right_cb, NULL);
+        ESP_LOGI(TAG, "Knob registered for dialog page scrolling");
+    }
+
+    // Register knob button press to dismiss dialog
+    const button_config_t btn_cfg = {
+        .type = BUTTON_TYPE_CUSTOM,
+        .long_press_time = 6000,
+        .short_press_time = 200,
+        .custom_button_config = {
+            .active_level = 0,
+            .button_custom_init = bsp_knob_btn_init,
+            .button_custom_deinit = bsp_knob_btn_deinit,
+            .button_custom_get_key_value = bsp_knob_btn_get_key_value,
+        },
+    };
+    s_btn_handle = iot_button_create(&btn_cfg);
+    if (s_btn_handle) {
+        iot_button_register_cb(s_btn_handle, BUTTON_PRESS_UP, knob_btn_cb, NULL);
+        iot_button_register_cb(s_btn_handle, BUTTON_LONG_PRESS_START, knob_btn_long_cb, NULL);
+        ESP_LOGI(TAG, "Knob button registered (press=dismiss, long=reboot)");
+    }
 
     ESP_LOGI(TAG, "Dialog renderer initialized");
 }
@@ -105,44 +188,34 @@ void pw_dialog_show(const char *text, pw_msg_level_t level)
     strncpy(s_last_text, text, PW_DIALOG_MAX_TEXT - 1);
     s_last_text[PW_DIALOG_MAX_TEXT - 1] = '\0';
 
-    // Start with empty text and small container
-    lv_label_set_text(s_dialog_label, " ");
-    s_revealed_chars = 0;
-    s_typing = true;
+    // Calculate pages
+    s_total_pages = (s_full_text_len + CHARS_PER_PAGE - 1) / CHARS_PER_PAGE;
+    if (s_total_pages < 1) s_total_pages = 1;
+    s_current_page = 0;
 
-    // Set container to min height before unhiding — small dirty region
-    s_current_height = DIALOG_MIN_HEIGHT;
-    lv_obj_set_height(s_dialog_container, s_current_height);
-    s_target_height = estimate_height(s_full_text_len);
-    s_growing = (s_target_height > s_current_height);
+    // Show first page
+    show_current_page();
 
     if (level < 4) {
         lv_obj_set_style_border_color(s_dialog_container, lv_color_hex(LEVEL_COLOR_HEX[level]), 0);
     }
 
-    // Unhide at min height — dirty region is only 288x30 (safe for SPI)
     lv_obj_clear_flag(s_dialog_container, LV_OBJ_FLAG_HIDDEN);
     s_visible = true;
     s_show_time_ms = now_ms();
 
-    ESP_LOGI(TAG, "Dialog: [%s] %s (%d chars, target_h=%d)",
+    ESP_LOGI(TAG, "Dialog: [%s] (%d chars, %d pages) %s",
         level == PW_MSG_LEVEL_SUCCESS ? "success" :
         level == PW_MSG_LEVEL_WARNING ? "warning" :
         level == PW_MSG_LEVEL_ERROR   ? "error"   : "info",
-        text, s_full_text_len, s_target_height);
+        s_full_text_len, s_total_pages, text);
 }
 
 void pw_dialog_hide(void)
 {
     if (!s_dialog_container || !s_visible) return;
-
-    // Shrink to min before hiding — reduces the dirty region from hide
-    lv_obj_set_height(s_dialog_container, DIALOG_MIN_HEIGHT);
     lv_obj_add_flag(s_dialog_container, LV_OBJ_FLAG_HIDDEN);
     s_visible = false;
-    s_typing = false;
-    s_growing = false;
-    s_current_height = DIALOG_MIN_HEIGHT;
 }
 
 bool pw_dialog_is_visible(void)
@@ -150,42 +223,71 @@ bool pw_dialog_is_visible(void)
     return s_visible;
 }
 
+void pw_dialog_next_page(void)
+{
+    if (!s_visible || s_total_pages <= 1) return;
+    s_current_page = (s_current_page + 1) % s_total_pages;
+    show_current_page();
+    // Reset dismiss timer on page change
+    s_show_time_ms = now_ms();
+    ESP_LOGI(TAG, "Dialog page %d/%d", s_current_page + 1, s_total_pages);
+}
+
+void pw_dialog_prev_page(void)
+{
+    if (!s_visible || s_total_pages <= 1) return;
+    s_current_page = (s_current_page - 1 + s_total_pages) % s_total_pages;
+    show_current_page();
+    s_show_time_ms = now_ms();
+    ESP_LOGI(TAG, "Dialog page %d/%d", s_current_page + 1, s_total_pages);
+}
+
 void pw_dialog_tick(void)
 {
-    if (!s_visible) return;
-
-    // Stage 1: Grow container height gradually (10px per frame)
-    if (s_growing) {
-        s_current_height += DIALOG_HEIGHT_STEP;
-        if (s_current_height >= s_target_height) {
-            s_current_height = s_target_height;
-            s_growing = false;
-        }
-        lv_obj_set_height(s_dialog_container, s_current_height);
+    // Long press reboot — works whether dialog is visible or not
+    if (s_knob_long_pressed) {
+        s_knob_long_pressed = false;
+        ESP_LOGW(TAG, "Long press detected — rebooting");
+        esp_restart();
     }
 
-    // Stage 2: Typewriter — reveal text as box grows
-    if (s_typing) {
-        s_revealed_chars += TYPEWRITER_CHARS_PER_TICK;
-        if (s_revealed_chars >= s_full_text_len) {
-            s_revealed_chars = s_full_text_len;
-            s_typing = false;
-            s_show_time_ms = now_ms();
-            ESP_LOGI(TAG, "Typewriter done: %d chars, height=%d", s_full_text_len, s_current_height);
-        }
-
-        char saved = s_full_text[s_revealed_chars];
-        s_full_text[s_revealed_chars] = '\0';
-        lv_label_set_text(s_dialog_label, s_full_text);
-        s_full_text[s_revealed_chars] = saved;
+    if (!s_visible) {
+        // Drain stale button presses so they don't dismiss the next dialog
+        s_knob_pressed = false;
+        s_knob_next = false;
+        s_knob_prev = false;
         return;
     }
 
-    // Stage 3: Dismiss after timeout
+    // Check knob input flags (set from ISR, consumed here inside LVGL lock)
+    if (s_knob_pressed) {
+        s_knob_pressed = false;
+        ESP_LOGI(TAG, "Dialog dismissed by knob press");
+        pw_dialog_hide();
+        return;
+    }
+    if (s_knob_next) {
+        s_knob_next = false;
+        pw_dialog_next_page();
+    }
+    if (s_knob_prev) {
+        s_knob_prev = false;
+        pw_dialog_prev_page();
+    }
+
     int64_t elapsed = now_ms() - s_show_time_ms;
     if (elapsed > PW_DIALOG_DISPLAY_MS) {
         pw_dialog_hide();
     }
+}
+
+bool pw_dialog_consume_btn_wake(void)
+{
+    if (s_btn_wake_requested) {
+        s_btn_wake_requested = false;
+        return true;
+    }
+    return false;
 }
 
 const char *pw_dialog_get_last_text(void)

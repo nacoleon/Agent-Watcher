@@ -51,9 +51,10 @@
 
     <h2>Message</h2>
     <div class="msg-row">
-        <input id="txt" placeholder="Send message..." maxlength="160">
+        <input id="txt" placeholder="Send message..." maxlength="1000" oninput="updateCount()">
         <button onclick="sendMsg()">Send</button>
     </div>
+    <div id="char-count" style="font-size:11px;color:#5566AA;margin-top:4px;">0 / 160</div>
 
     <h2>Background</h2>
     <div class="msg-row">
@@ -90,6 +91,13 @@
             poll();
         }
         document.getElementById('txt').addEventListener('keypress', e => { if (e.key === 'Enter') sendMsg(); });
+        function updateCount() {
+            const inp = document.getElementById('txt');
+            const cnt = document.getElementById('char-count');
+            const len = inp.value.length;
+            cnt.textContent = len + ' / 1000';
+            cnt.style.color = len >= 1000 ? '#AA5555' : len >= 800 ? '#AAAA55' : '#5566AA';
+        }
 
         async function setBg(dir) {
             const inp = document.getElementById('bg-idx');

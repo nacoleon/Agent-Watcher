@@ -9,15 +9,22 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 - **PW_STATE_WAKEUP**: New agent state with wakeup button in web UI, purple badge, mapped to "wakeup" animation in frames.json
 - **Wakeup state queue**: When display wakes from off, pending state changes are queued and applied after wakeup animation completes
 - **Slower wakeup frame rate**: Wakeup animation runs at 2x slower speed (every 6 ticks vs 3) for a natural getting-up feel
+- **Dialog pagination**: Messages over 80 chars split into pages, scroll with physical knob wheel. Page indicator (e.g., "1/3") at bottom-right. 1000 char message limit.
+- **Knob button controls**: Short press dismisses dialog (only when visible), long press (6s) hard reboots. Button press while display is off triggers wakeup animation.
+- **Character counter in web UI**: Live count (0/1000) with yellow at 800, red at limit
+- **SPI flush retry**: SPD2010 driver retries full CASET+RASET+RAMWR sequence on SPI stall with 10ms recovery delay. LVGL flush callback signals flush_ready on retry failure to prevent permanent mutex deadlock.
 
 ### Changed
 - **Transition walks generalized**: Sprite now walks between ANY two fixed-position states (not just from idle). Prevents large SPI dirty regions that caused display freezes
 - **LVGL lock timeout**: `lvgl_port_lock` now uses 500ms timeout instead of wait-forever, allowing renderer to recover from SPI flush stalls
+- **Dialog box fixed at 288x88**: No per-frame size changes — per-frame lv_obj_set_height/lv_label_set_text triggers the SPI flush race condition permanently
 - **Sprites.html improvements**: Down/KO frame (25x13) added to frame grid, animation preview resizes per-frame for mixed-size animations, per-animation speed support
 
 ### Fixed
 - **Display freeze on non-idle→sleeping transition**: Position snap from bottom-center to sleep position created large SPI dirty region. Fixed by generalizing transition walks to all state changes
 - **Display freeze on state change during sleep window**: Same root cause — no transition walk when leaving sleeping state
+- **LVGL flush deadlock root cause**: `lvgl_port_flush_callback` never called `lv_disp_flush_ready()` when `esp_lcd_panel_draw_bitmap` failed — LVGL waited forever for flush completion
+- **Web server buffer overflow**: 256-byte body buffer overflowed with long messages in JSON wrapper. Increased to 1280 bytes.
 - **Dead wake flag**: `s_pre_sleep_triggered` never reset after first sleep cycle because `s_wake_requested` was consumed before the reset check. Fixed with `woke_this_frame` flag
 
 ### Previous
