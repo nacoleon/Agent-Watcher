@@ -3,6 +3,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { VALID_STATES } from "./config.js";
 import * as watcher from "./watcher-client.js";
 
+function error(msg: string) {
+  return { content: [{ type: "text" as const, text: msg }], isError: true };
+}
+
+function ok(data: any) {
+  return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
+}
+
 export function registerTools(server: McpServer): void {
   server.registerTool(
     "display_message",
@@ -20,8 +28,11 @@ export function registerTools(server: McpServer): void {
       },
     },
     async ({ text, level }: { text: string; level: string }) => {
-      const result = await watcher.sendMessage(text, level);
-      return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+      try {
+        return ok(await watcher.sendMessage(text, level));
+      } catch (err: any) {
+        return error(`Watcher error: ${err.message}`);
+      }
     }
   );
 
@@ -39,8 +50,11 @@ export function registerTools(server: McpServer): void {
       },
     },
     async ({ state }: { state: string }) => {
-      const result = await watcher.setState(state);
-      return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+      try {
+        return ok(await watcher.setState(state));
+      } catch (err: any) {
+        return error(`Watcher error: ${err.message}`);
+      }
     }
   );
 
@@ -52,8 +66,11 @@ export function registerTools(server: McpServer): void {
         "Read current Watcher state: agent_state, person_present, uptime, wifi signal.",
     },
     async () => {
-      const status = await watcher.getStatus();
-      return { content: [{ type: "text" as const, text: JSON.stringify(status) }] };
+      try {
+        return ok(await watcher.getStatus());
+      } catch (err: any) {
+        return error(`Watcher error: ${err.message}`);
+      }
     }
   );
 
@@ -75,9 +92,16 @@ export function registerTools(server: McpServer): void {
       },
     },
     async ({ state, text, level }: { state: string; text: string; level: string }) => {
-      await watcher.setState(state);
-      const result = await watcher.sendMessage(text, level);
-      return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+      try {
+        await watcher.setState(state);
+      } catch (err: any) {
+        return error(`Failed to set state: ${err.message}`);
+      }
+      try {
+        return ok(await watcher.sendMessage(text, level));
+      } catch (err: any) {
+        return error(`State set to ${state}, but message failed: ${err.message}`);
+      }
     }
   );
 
@@ -89,8 +113,11 @@ export function registerTools(server: McpServer): void {
         "Hardware-like reboot of the Watcher device. Power cycles LCD and AI chip before restart.",
     },
     async () => {
-      const result = await watcher.reboot();
-      return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+      try {
+        return ok(await watcher.reboot());
+      } catch (err: any) {
+        return error(`Watcher error: ${err.message}`);
+      }
     }
   );
 }
