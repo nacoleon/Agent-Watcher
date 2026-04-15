@@ -130,4 +130,23 @@ export function registerTools(server: McpServer): void {
       }
     }
   );
+
+  server.registerTool(
+    "heartbeat",
+    {
+      title: "Heartbeat",
+      description:
+        "Send a heartbeat to the Watcher to indicate OpenClaw is alive. " +
+        "Call this every hour. If the Watcher doesn't receive a heartbeat " +
+        "for 1.5 hours, it switches to 'down' state. Sending a heartbeat " +
+        "while in 'down' state auto-recovers to idle.",
+    },
+    async () => {
+      try {
+        return ok(await watcher.heartbeat());
+      } catch (err: any) {
+        return error(`Watcher error: ${err.message}`);
+      }
+    }
+  );
 }

@@ -65,3 +65,7 @@ export async function sendMessage(text: string, level: string = "info"): Promise
 export async function reboot(): Promise<any> {
   return request("POST", "/api/reboot");
 }
+
+export async function heartbeat(): Promise<any> {
+  return request("POST", "/api/heartbeat");
+}

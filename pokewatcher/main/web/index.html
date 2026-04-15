@@ -65,6 +65,12 @@
         <button id="rotate-btn" onclick="toggleRotate()" style="margin-left:auto;">Rotate: ON</button>
     </div>
 
+    <h2>Heartbeat</h2>
+    <div class="card" id="hb-card" style="font-size:12px;">
+        <div class="stat"><span class="label">Status</span><span id="hb-status">--</span></div>
+        <div id="hb-log" style="margin-top:6px;color:#5566AA;"></div>
+    </div>
+
     <button class="reboot" onclick="reboot()">Reboot Watcher</button>
 
     <script>
@@ -139,6 +145,25 @@
                 rb.textContent = 'Rotate: ' + (d.auto_rotate ? 'ON' : 'OFF');
                 rb.className = d.auto_rotate ? 'on' : '';
                 document.querySelectorAll('#btns button').forEach(b => b.className = b.textContent === cur ? 'on' : '');
+
+                // Heartbeat log
+                const uptimeMs = d.uptime_seconds * 1000;
+                const hbStatus = document.getElementById('hb-status');
+                const hbLog = document.getElementById('hb-log');
+                if (d.last_heartbeat_ms > 0) {
+                    const agoMs = uptimeMs - d.last_heartbeat_ms;
+                    const agoMin = Math.floor(agoMs / 60000);
+                    hbStatus.textContent = agoMin + 'm ago';
+                    hbStatus.style.color = agoMin > 90 ? '#AA5555' : '#7BE87B';
+                } else {
+                    hbStatus.textContent = 'No heartbeat yet';
+                    hbStatus.style.color = '#5566AA';
+                }
+                const log = d.heartbeat_log || [];
+                hbLog.innerHTML = log.map((ms, i) => {
+                    const ago = Math.floor((uptimeMs - ms) / 60000);
+                    return (i === 0 ? '&#9679; ' : '&#9675; ') + ago + 'm ago';
+                }).join('<br>') || 'No heartbeats recorded';
             } catch(e) {}
         }
         function fmt(s) { const h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h>0?h+'h '+m+'m':m+'m'; }

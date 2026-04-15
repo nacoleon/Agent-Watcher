@@ -3,6 +3,7 @@
 #include "sprite_loader.h"
 #include "agent_state.h"
 #include "dialog.h"
+#include "web_server.h"
 #include "sensecap-watcher.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -944,6 +945,25 @@ static void renderer_task(void *arg)
             display_sleep();
         }
 
+        // Heartbeat timeout: switch to "down" if no heartbeat for 1.5 hours
+        #define HEARTBEAT_TIMEOUT_MS  5400000  // 1.5 hours
+        static bool s_heartbeat_timeout_triggered = false;
+        {
+            int64_t last_hb = pw_web_get_last_heartbeat_ms();
+            if (last_hb > 0) {
+                if (now_ms - last_hb >= HEARTBEAT_TIMEOUT_MS && !s_heartbeat_timeout_triggered &&
+                    s_current_state != PW_STATE_DOWN) {
+                    s_heartbeat_timeout_triggered = true;
+                    s_pending_state = PW_STATE_DOWN;
+                    s_state_changed = true;
+                    ESP_LOGW(TAG, "Heartbeat timeout — switching to DOWN state");
+                }
+                if (now_ms - last_hb < HEARTBEAT_TIMEOUT_MS) {
+                    s_heartbeat_timeout_triggered = false;
+                }
+            }
+        }
+
         // Reset pre-sleep flag when activity resumes (use woke_this_frame since
         // s_wake_requested was consumed at top of loop)
         if (woke_this_frame) {
@@ -1064,6 +1084,7 @@ static void renderer_task(void *arg)
                         case PW_STATE_WAITING:   bsp_rgb_set(255, 140, 0);   break;  // orange
                         case PW_STATE_GREETING:  bsp_rgb_set(255, 50, 100);  break;  // pink
                         case PW_STATE_REPORTING: bsp_rgb_set(0, 255, 0);     break;  // green
+                        case PW_STATE_DOWN:      bsp_rgb_set(255, 0, 0);     break;  // red
                         default: break;  // no blink for other states
                     }
                 } else if (blink_phase == 3) {
@@ -1071,7 +1092,8 @@ static void renderer_task(void *arg)
                     if (s_current_state == PW_STATE_ALERT ||
                         s_current_state == PW_STATE_WAITING ||
                         s_current_state == PW_STATE_GREETING ||
-                        s_current_state == PW_STATE_REPORTING) {
+                        s_current_state == PW_STATE_REPORTING ||
+                        s_current_state == PW_STATE_DOWN) {
                         bsp_rgb_set(0, 0, 0);
                     }
                 }

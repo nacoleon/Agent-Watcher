@@ -15,6 +15,10 @@
 
 static const char *TAG = "pw_web";
 static httpd_handle_t s_server = NULL;
+static volatile int64_t s_last_heartbeat_ms = 0;
+#define HEARTBEAT_LOG_SIZE 5
+static int64_t s_heartbeat_log[HEARTBEAT_LOG_SIZE] = {0};
+static int s_heartbeat_log_count = 0;
 
 static int recv_full_body(httpd_req_t *req, char *buf, int buf_size)
 {
@@ -65,6 +69,11 @@ static esp_err_t handle_api_status(httpd_req_t *req)
     cJSON_AddBoolToObject(root, "auto_rotate", pw_renderer_get_auto_rotate());
     cJSON_AddBoolToObject(root, "dialog_visible", pw_dialog_is_visible());
     cJSON_AddNumberToObject(root, "dismiss_count", pw_dialog_get_dismiss_count());
+    cJSON_AddNumberToObject(root, "last_heartbeat_ms", (double)s_last_heartbeat_ms);
+    cJSON *hb_arr = cJSON_AddArrayToObject(root, "heartbeat_log");
+    for (int i = 0; i < s_heartbeat_log_count; i++) {
+        cJSON_AddItemToArray(hb_arr, cJSON_CreateNumber((double)s_heartbeat_log[i]));
+    }
 
     wifi_ap_record_t ap_info;
     if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
@@ -211,6 +220,39 @@ static esp_err_t handle_api_background(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t handle_api_heartbeat(httpd_req_t *req)
+{
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    s_last_heartbeat_ms = now_ms;
+
+    // Shift log and add new entry
+    for (int i = HEARTBEAT_LOG_SIZE - 1; i > 0; i--) {
+        s_heartbeat_log[i] = s_heartbeat_log[i - 1];
+    }
+    s_heartbeat_log[0] = now_ms;
+    if (s_heartbeat_log_count < HEARTBEAT_LOG_SIZE) s_heartbeat_log_count++;
+
+    ESP_LOGI(TAG, "Heartbeat received at %lld ms (log count=%d)", now_ms, s_heartbeat_log_count);
+
+    // Auto-recover from "down" state
+    pw_agent_state_data_t state = pw_agent_state_get();
+    if (state.current_state == PW_STATE_DOWN) {
+        ESP_LOGI(TAG, "Heartbeat: recovering from DOWN -> IDLE");
+        pw_agent_state_set(PW_STATE_IDLE);
+        pw_renderer_wake_display();
+    }
+
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "ok", true);
+    cJSON_AddNumberToObject(resp, "last_heartbeat_ms", (double)now_ms);
+    char *json = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
+    free(json);
+    return ESP_OK;
+}
+
 static esp_err_t handle_api_reboot(httpd_req_t *req)
 {
     cJSON *resp = cJSON_CreateObject();
@@ -254,6 +296,9 @@ static void register_routes(httpd_handle_t server)
 
     httpd_uri_t bg_uri = { .uri = "/api/background", .method = HTTP_PUT, .handler = handle_api_background };
     httpd_register_uri_handler(server, &bg_uri);
+
+    httpd_uri_t heartbeat_uri = { .uri = "/api/heartbeat", .method = HTTP_POST, .handler = handle_api_heartbeat };
+    httpd_register_uri_handler(server, &heartbeat_uri);
 }
 
 static void init_mdns(void)
@@ -287,6 +332,11 @@ void pw_web_server_start(void)
 
     register_routes(s_server);
     ESP_LOGI(TAG, "Web server started on port %d", PW_WEB_SERVER_PORT);
+}
+
+int64_t pw_web_get_last_heartbeat_ms(void)
+{
+    return s_last_heartbeat_ms;
 }
 
 void pw_web_server_stop(void)
