@@ -7,6 +7,7 @@ export interface WatcherStatus {
   last_message: string;
   uptime_seconds: number;
   wifi_rssi?: number;
+  dialog_visible: boolean;
 }
 
 function request(method: string, path: string, body?: object): Promise<any> {
