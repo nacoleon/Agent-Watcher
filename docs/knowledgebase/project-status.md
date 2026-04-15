@@ -18,6 +18,9 @@ Last updated: 2026-04-14
 - FF9 dialog box at top of screen (shows on message, auto-hides after timeout, no opacity fade)
 - Background image loading: pre-loads tile from SD card at boot, scaled to 412x412 in PSRAM
 - Background switching via PUT /api/background with web UI controls (prev/next/set)
+- Background auto-rotation every 5 min with strip wipe transition (20 rows/frame, ~2s wipe)
+- Dialog pagination: 80 chars/page, knob wheel scrolls pages, page indicator (1/3), 1000 char max
+- Knob button: short press dismisses dialog, long press (6s) reboots, press while display off wakes
 - Display sleep: 3min idle → sleeping state → 15s later display off. Also sleeps 15s after sleeping state set via API
 - Speaker muted at boot (bsp_codec_mute_set) to prevent idle amp pops
 - Hardware-like reboot from web UI (power cycles LCD/AI chip before restart)
@@ -55,14 +58,17 @@ Last updated: 2026-04-14
 
 ## What Needs To Be Done
 
-### SPI Flush Issue (Backlog)
-- [ ] **Intermittent SPI flush failure** — `spi_device_queue_trans` returns `ESP_ERR_INVALID_STATE` (0x101) on large dirty regions. Error means "polling transaction not terminated." Boot-dependent and intermittent. Diagnostic logging in SPD2010 driver (`esp_lcd_spd2010.c`). Tested: Himax disable, LVGL core pinning (made it worse), BSP flush recovery (caused artifacts). Root cause likely race condition in ESP-IDF SPI driver between polling and queued transactions. See `docs/knowledgebase/display-freeze-root-cause.md`.
+### SPI Flush Issue (Mitigated)
+- [x] **SPD2010 driver retry** — Retries full CASET+RASET+RAMWR on failure with 10ms delay
+- [x] **LVGL flush deadlock fix** — `lv_disp_flush_ready()` called on error to prevent permanent mutex lock
+- [x] **lvgl_port_lock timeout** — 500ms timeout instead of wait-forever
+- [ ] **Root cause still open** — ESP-IDF SPI driver race condition between polling and queued transactions. See `docs/knowledgebase/spi-flush-stall-bug.md`
 
 ### Background Images
 - [x] Pre-load single background at boot — DONE
-- [ ] Runtime background switching via web UI — API exists but intermittent SPI errors on large flush
-- [ ] Auto-rotate backgrounds every 5 minutes (matches dashboard behavior)
-- [ ] Pre-cache multiple backgrounds in PSRAM for instant switching
+- [x] Runtime background switching via web UI with strip wipe — DONE
+- [x] Auto-rotate backgrounds every 5 minutes — DONE (72 tiles, random selection)
+- [x] Double-buffered staging for SPI-safe transitions — DONE
 
 ### End-to-End Integration
 - [ ] **End-to-end bridge test** — Verify Zidane agent can call bridge tools and Watcher responds

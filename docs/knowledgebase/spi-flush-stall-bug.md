@@ -124,3 +124,65 @@ Dialog container starts at 48px height, grows 10px/frame while typewriter types 
 ## Key Insight
 
 The #1 bug was that `lvgl_port_flush_callback` never called `lv_disp_flush_ready()` on error. This turned an intermittent SPI hiccup into a permanent display freeze. With the retry + safety net, the SPI hiccup is survivable.
+
+---
+
+## Background Auto-Rotation Changes (2026-04-14)
+
+These changes were added AFTER the dialog fixes above. If background rotation causes issues, these are the exact changes to revert (all in `pokewatcher/main/renderer.c`):
+
+### What changed
+
+**1. Staging buffer for double-buffered transitions**
+- Added `s_bg_staging_buf` (340KB PSRAM) alongside existing `s_bg_buf`
+- New background tiles load into staging, then memcpy to live buffer
+- Total PSRAM for backgrounds: ~680KB (was ~340KB)
+
+**2. `load_background_tile()` renamed to `load_background_tile_to_staging()`**
+- Same logic but writes to `s_bg_staging_buf` instead of `s_bg_buf`
+- Allocates both buffers on first call
+- LVGL image descriptor (`s_bg_dsc.data`) always points to `s_bg_buf` (live)
+
+**3. `start_background_wipe()` — new function**
+- Called inside LVGL lock after staging buffer is ready
+- `memcpy(s_bg_buf, s_bg_staging_buf, 340KB)` — ~3ms, replaces live buffer contents
+- `lv_img_cache_invalidate_src(&s_bg_dsc)` — clears LVGL image cache
+- Sets `s_bg_wipe_active = true`, `s_bg_wipe_row = 0`
+
+**4. Strip wipe in render loop (inside LVGL lock section)**
+- When `s_bg_wipe_active`: invalidates 20 rows per frame via `lv_obj_invalidate_area(s_bg_img, &strip)`
+- Each frame's dirty region: 412x20 pixels (~16KB SPI) — safe size
+- Full wipe completes in ~21 frames (~2 seconds at 10 FPS)
+- Looks like intentional top-to-bottom transition
+
+**5. Auto-rotation timer**
+- `BG_ROTATE_INTERVAL_MS = 300000` (5 minutes)
+- Picks random tile from `s_bg_tile_list[]` (72 tiles)
+- Only triggers when `!s_display_sleeping && !s_bg_wipe_active`
+- Sets `s_bg_change_requested = true` to trigger the normal change flow
+
+**6. Initial boot load changed**
+- `load_background_tile_to_staging(16)` + immediate `memcpy` to live buffer
+- No wipe for first load (display not visible yet)
+- Initializes `s_bg_last_rotate_ms` for auto-rotation timer
+
+### How to revert
+
+To undo ALL background rotation changes, revert renderer.c to commit `fb5e3e1`:
+```bash
+git checkout fb5e3e1 -- pokewatcher/main/renderer.c
+```
+
+Or selectively revert by:
+1. Remove `s_bg_staging_buf`, strip wipe state vars, auto-rotation vars/tile list
+2. Rename `load_background_tile_to_staging` back to `load_background_tile` writing directly to `s_bg_buf`
+3. Remove `start_background_wipe()` function
+4. Remove strip wipe processing block from LVGL lock section
+5. Remove auto-rotation timer check
+6. Restore initial boot load to direct `load_background_tile(16)` call
+
+### Why this approach
+
+The SPI flush stalls on dirty regions that are too large. A full background swap (412x412 = 170K pixels) would stall every time. The strip wipe spreads the flush across 21 frames with 412x20 dirty regions (~8K pixels each), keeping each frame's SPI transfer well within safe limits.
+
+The staging buffer prevents tearing: the live buffer is updated atomically via memcpy (~3ms), then LVGL gradually re-flushes strips to the display. The display shows old pixels in not-yet-flushed strips and new pixels in flushed strips — creating a visual wipe effect.

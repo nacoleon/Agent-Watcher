@@ -26,12 +26,28 @@ static lv_obj_t *s_zzz_label = NULL;
 
 // Background state
 static uint8_t *s_bg_buf = NULL;
+static uint8_t *s_bg_staging_buf = NULL;  // staging buffer for strip wipe transition
 static lv_img_dsc_t s_bg_dsc = {};
 static bool s_bg_available = false;
 static char s_bg_path[300] = "";
 static bool s_bg_needs_load = false;
 static int s_bg_pending_idx = -1;
 static int s_current_bg_idx = -1;
+
+// Strip wipe transition state
+static bool s_bg_wipe_active = false;
+static int s_bg_wipe_row = 0;           // next row to invalidate
+#define BG_WIPE_ROWS_PER_FRAME  20       // rows per frame (~412x20 = safe SPI size)
+
+// Auto-rotation
+static int64_t s_bg_last_rotate_ms = 0;
+#define BG_ROTATE_INTERVAL_MS  300000    // 5 minutes
+static int s_bg_tile_list[] = {
+    1,2,3,4,5,6,7,8,10,11,12,13,15,16,17,20,24,25,27,28,29,30,31,32,33,
+    34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,
+    56,57,58,59,60,61,62,63,64,66,68,69,70,71,72,74,75,76,77,78,79,80,81,83
+};
+#define BG_TILE_COUNT  (sizeof(s_bg_tile_list) / sizeof(s_bg_tile_list[0]))
 
 static pw_sprite_data_t s_sprite = {};
 static pw_agent_state_t s_current_state = PW_STATE_IDLE;
@@ -68,11 +84,12 @@ static const uint8_t STATE_BGS[][BG_PER_STATE] = {
 };
 #endif
 
-static bool load_background_tile(int bg_idx)
+// Load a background tile into the staging buffer (for strip wipe transition)
+// Call this OUTSIDE the LVGL lock — it does SD card I/O
+static bool load_background_tile_to_staging(int bg_idx)
 {
     if (!s_bg_available) return false;
 
-    // Load individual tile file: /sdcard/characters/zidane/bg/XX.raw
     char path[300];
     snprintf(path, sizeof(path), "%s/zidane/bg/%02d.raw", PW_SD_CHARACTER_DIR, bg_idx);
 
@@ -82,20 +99,19 @@ static bool load_background_tile(int bg_idx)
         return false;
     }
 
-    // Read header (4 bytes: width, height)
     uint16_t dims[2];
     fread(dims, 2, 2, f);
     uint16_t tw = dims[0], th = dims[1];
 
-    // Read entire tile in one sequential read (~80KB)
     size_t tile_size = tw * th * 2;
     uint16_t *tile_buf = heap_caps_malloc(tile_size, MALLOC_CAP_SPIRAM);
     if (!tile_buf) { fclose(f); ESP_LOGE(TAG, "tile alloc failed"); return false; }
     fread(tile_buf, 2, tw * th, f);
     fclose(f);
 
-    // Allocate display buffer (412*412*2 = 339488 bytes)
     size_t dst_size = PW_DISPLAY_WIDTH * PW_DISPLAY_HEIGHT * 2;
+
+    // Allocate live buffer if first load
     if (!s_bg_buf) {
         s_bg_buf = heap_caps_malloc(dst_size, MALLOC_CAP_SPIRAM);
         if (!s_bg_buf) {
@@ -105,19 +121,29 @@ static bool load_background_tile(int bg_idx)
         }
     }
 
-    // Scale tile to display via nearest-neighbor
-    uint16_t *dst = (uint16_t *)s_bg_buf;
+    // Allocate staging buffer for wipe transitions
+    if (!s_bg_staging_buf) {
+        s_bg_staging_buf = heap_caps_malloc(dst_size, MALLOC_CAP_SPIRAM);
+        if (!s_bg_staging_buf) {
+            heap_caps_free(tile_buf);
+            ESP_LOGE(TAG, "bg staging alloc failed");
+            return false;
+        }
+    }
+
+    // Scale tile to staging buffer via nearest-neighbor
+    uint16_t *dst = (uint16_t *)s_bg_staging_buf;
     for (int dy = 0; dy < PW_DISPLAY_HEIGHT; dy++) {
         int sy = dy * th / PW_DISPLAY_HEIGHT;
         for (int dx = 0; dx < PW_DISPLAY_WIDTH; dx++) {
             int sx = dx * tw / PW_DISPLAY_WIDTH;
             uint16_t px = tile_buf[sy * tw + sx];
-            dst[dy * PW_DISPLAY_WIDTH + dx] = (px >> 8) | (px << 8);  // byte-swap for LV_COLOR_16_SWAP
+            dst[dy * PW_DISPLAY_WIDTH + dx] = (px >> 8) | (px << 8);
         }
     }
     heap_caps_free(tile_buf);
 
-    // Set up LVGL image descriptor
+    // Set up LVGL image descriptor (points to live buffer, not staging)
     s_bg_dsc.header.cf = LV_IMG_CF_TRUE_COLOR;
     s_bg_dsc.header.always_zero = 0;
     s_bg_dsc.header.reserved = 0;
@@ -127,6 +153,26 @@ static bool load_background_tile(int bg_idx)
     s_bg_dsc.data = s_bg_buf;
 
     return true;
+}
+
+// Start the strip wipe: copy staging → live and begin gradual invalidation
+// Call this INSIDE the LVGL lock
+static void start_background_wipe(void)
+{
+    if (!s_bg_buf || !s_bg_staging_buf) return;
+
+    // Fast memcpy: staging → live (~340KB, ~3ms on PSRAM)
+    size_t dst_size = PW_DISPLAY_WIDTH * PW_DISPLAY_HEIGHT * 2;
+    memcpy(s_bg_buf, s_bg_staging_buf, dst_size);
+
+    // Invalidate image cache so LVGL re-reads the buffer
+    lv_img_cache_invalidate_src(&s_bg_dsc);
+
+    // Start strip wipe from top
+    s_bg_wipe_active = true;
+    s_bg_wipe_row = 0;
+
+    ESP_LOGI(TAG, "Background wipe started (%d rows/frame)", BG_WIPE_ROWS_PER_FRAME);
 }
 
 // --- Behavior state machine (matches web UI) ---
@@ -635,8 +681,10 @@ bool pw_renderer_load_character(const char *character_id)
         s_bg_available = true;
         ESP_LOGI(TAG, "Background tiles found at %s/%s/bg/", PW_SD_CHARACTER_DIR, character_id);
 
-        // Pre-load initial background before Himax starts
-        if (load_background_tile(16)) {
+        // Pre-load initial background before Himax starts (no wipe for first load)
+        if (load_background_tile_to_staging(16)) {
+            size_t dst_size = PW_DISPLAY_WIDTH * PW_DISPLAY_HEIGHT * 2;
+            memcpy(s_bg_buf, s_bg_staging_buf, dst_size);
             s_current_bg_idx = 16;
             lvgl_port_lock(0);
             if (s_bg_img) {
@@ -644,7 +692,8 @@ bool pw_renderer_load_character(const char *character_id)
                 lv_obj_clear_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
             }
             lvgl_port_unlock();
-            ESP_LOGI(TAG, "Initial background loaded: tile 01");
+            s_bg_last_rotate_ms = esp_timer_get_time() / 1000;
+            ESP_LOGI(TAG, "Initial background loaded: tile 16");
         }
     } else {
         s_bg_available = false;
@@ -752,20 +801,37 @@ static void renderer_task(void *arg)
         if (s_bg_change_requested) {
             s_bg_change_requested = false;
             int new_idx = s_pending_bg_idx;
-            if (new_idx != s_current_bg_idx && load_background_tile(new_idx)) {
+            if (new_idx != s_current_bg_idx && load_background_tile_to_staging(new_idx)) {
                 s_current_bg_idx = new_idx;
-                // lv_img_set_src is a small update — safe inside LVGL lock
+                // Start strip wipe transition inside LVGL lock
                 if (lvgl_port_lock(500)) {
                     if (s_bg_img) {
                         lv_img_set_src(s_bg_img, &s_bg_dsc);
                         lv_obj_clear_flag(s_bg_img, LV_OBJ_FLAG_HIDDEN);
                     }
+                    start_background_wipe();
                     lvgl_port_unlock();
-                    ESP_LOGI(TAG, "Background changed to tile %d", new_idx);
+                    ESP_LOGI(TAG, "Background wipe started for tile %d", new_idx);
                 } else {
                     ESP_LOGW(TAG, "LVGL lock timeout during bg change — will retry");
-                    s_bg_change_requested = true;  // retry next frame
+                    s_bg_change_requested = true;
                 }
+            }
+        }
+
+        // --- Auto-rotate background every 5 minutes ---
+        if (s_bg_available && !s_display_sleeping && !s_bg_wipe_active) {
+            int64_t now_ms = esp_timer_get_time() / 1000;
+            if (now_ms - s_bg_last_rotate_ms >= BG_ROTATE_INTERVAL_MS) {
+                s_bg_last_rotate_ms = now_ms;
+                // Pick next random tile
+                int next_idx = s_bg_tile_list[simple_rand() % BG_TILE_COUNT];
+                if (next_idx == s_current_bg_idx) {
+                    next_idx = s_bg_tile_list[(simple_rand() + 1) % BG_TILE_COUNT];
+                }
+                s_pending_bg_idx = next_idx;
+                s_bg_change_requested = true;
+                ESP_LOGI(TAG, "Auto-rotate: switching to tile %d", next_idx);
             }
         }
 
@@ -945,6 +1011,22 @@ static void renderer_task(void *arg)
 
             // Tick dialog auto-dismiss/typewriter
             pw_dialog_tick();
+
+            // Strip wipe: invalidate one strip per frame to gradually reveal new background
+            if (s_bg_wipe_active && s_bg_img) {
+                int y_start = s_bg_wipe_row;
+                int y_end = y_start + BG_WIPE_ROWS_PER_FRAME;
+                if (y_end >= PW_DISPLAY_HEIGHT) {
+                    y_end = PW_DISPLAY_HEIGHT;
+                    s_bg_wipe_active = false;
+                    ESP_LOGI(TAG, "Background wipe complete");
+                }
+                s_bg_wipe_row = y_end;
+
+                // Invalidate just this strip — LVGL will re-flush it from the (already updated) buffer
+                lv_area_t strip = { .x1 = 0, .y1 = y_start, .x2 = PW_DISPLAY_WIDTH - 1, .y2 = y_end - 1 };
+                lv_obj_invalidate_area(s_bg_img, &strip);
+            }
 
             int64_t before_unlock = esp_timer_get_time() / 1000;
             lvgl_port_unlock();
