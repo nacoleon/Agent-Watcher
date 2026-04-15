@@ -3,11 +3,12 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { registerTools } from "./tools.js";
 import { registerResources } from "./resources.js";
 import { startPresencePoller } from "./presence.js";
+import { initQueue } from "./queue.js";
 
 const server = new McpServer(
   {
     name: "watcher",
-    version: "1.0.0",
+    version: "1.1.0",
   },
   {
     capabilities: {
@@ -16,6 +17,7 @@ const server = new McpServer(
   }
 );
 
+initQueue(server);
 registerTools(server);
 registerResources(server);
 
