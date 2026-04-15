@@ -62,6 +62,7 @@
         <button onclick="setBg()">Set</button>
         <button onclick="setBg('prev')">Prev</button>
         <button onclick="setBg('next')">Next</button>
+        <button id="rotate-btn" onclick="toggleRotate()" style="margin-left:auto;">Rotate: ON</button>
     </div>
 
     <button class="reboot" onclick="reboot()">Reboot Watcher</button>
@@ -108,6 +109,13 @@
             await fetch('/api/background', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({index:idx}) });
         }
 
+        async function toggleRotate() {
+            const btn = document.getElementById('rotate-btn');
+            const on = btn.textContent.includes('ON');
+            await fetch('/api/background', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({auto_rotate:!on}) });
+            poll();
+        }
+
         async function reboot() {
             if (!confirm('Reboot the Watcher?')) return;
             try { await fetch('/api/reboot', { method:'POST' }); } catch(e) {}
@@ -127,7 +135,10 @@
                 document.getElementById('rssi').textContent = (d.wifi_rssi || '--') + ' dBm';
                 document.getElementById('msg').textContent = d.last_message || 'None';
                 if (d.background > 0) document.getElementById('bg-idx').value = d.background;
-                document.querySelectorAll('.btns button').forEach(b => b.className = b.textContent === cur ? 'on' : '');
+                const rb = document.getElementById('rotate-btn');
+                rb.textContent = 'Rotate: ' + (d.auto_rotate ? 'ON' : 'OFF');
+                rb.className = d.auto_rotate ? 'on' : '';
+                document.querySelectorAll('#btns button').forEach(b => b.className = b.textContent === cur ? 'on' : '');
             } catch(e) {}
         }
         function fmt(s) { const h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h>0?h+'h '+m+'m':m+'m'; }

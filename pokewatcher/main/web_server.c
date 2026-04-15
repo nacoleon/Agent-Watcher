@@ -62,6 +62,7 @@ static esp_err_t handle_api_status(httpd_req_t *req)
     cJSON_AddStringToObject(root, "last_message", pw_dialog_get_last_text());
     cJSON_AddNumberToObject(root, "uptime_seconds", (double)(esp_timer_get_time() / 1000000));
     cJSON_AddNumberToObject(root, "background", pw_renderer_get_background());
+    cJSON_AddBoolToObject(root, "auto_rotate", pw_renderer_get_auto_rotate());
     cJSON_AddBoolToObject(root, "dialog_visible", pw_dialog_is_visible());
     cJSON_AddNumberToObject(root, "dismiss_count", pw_dialog_get_dismiss_count());
 
@@ -178,21 +179,30 @@ static esp_err_t handle_api_background(httpd_req_t *req)
     }
 
     cJSON *idx_json = cJSON_GetObjectItem(root, "index");
-    if (!idx_json || !cJSON_IsNumber(idx_json)) {
+    cJSON *rotate_json = cJSON_GetObjectItem(root, "auto_rotate");
+
+    if (rotate_json && cJSON_IsBool(rotate_json)) {
+        pw_renderer_set_auto_rotate(cJSON_IsTrue(rotate_json));
+    }
+
+    if (idx_json && cJSON_IsNumber(idx_json)) {
+        int idx = (int)idx_json->valuedouble;
+        pw_renderer_set_background(idx);
+        pw_renderer_wake_display();
+    }
+
+    if (!idx_json && !rotate_json) {
         cJSON_Delete(root);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing 'index' field");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing 'index' or 'auto_rotate' field");
         return ESP_FAIL;
     }
 
-    int idx = (int)idx_json->valuedouble;
     cJSON_Delete(root);
-
-    pw_renderer_set_background(idx);
-    pw_renderer_wake_display();
 
     cJSON *resp = cJSON_CreateObject();
     cJSON_AddBoolToObject(resp, "ok", true);
-    cJSON_AddNumberToObject(resp, "background", idx);
+    cJSON_AddNumberToObject(resp, "background", pw_renderer_get_background());
+    cJSON_AddBoolToObject(resp, "auto_rotate", pw_renderer_get_auto_rotate());
     char *json = cJSON_PrintUnformatted(resp);
     cJSON_Delete(resp);
     httpd_resp_set_type(req, "application/json");

@@ -5,6 +5,12 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 ## [Unreleased]
 
 ### Added
+- **RGB LED state blink**: WS2812 LED blinks every 5 seconds with state-specific color — red (alert), orange (waiting), pink (greeting), green (reporting). LED turns off on knob dismiss and display sleep.
+- **Background auto-rotate toggle**: Web UI button and API field (`auto_rotate`) to pause/resume the 5-minute background rotation.
+
+### Previous Unreleased
+
+### Added
 - **Watcher MCP server**: Stdio MCP server replaces the Express HTTP bridge for OpenClaw integration. Zidane auto-discovers `watcher__*` tools (display_message, set_state, get_status, notify, reboot) via MCP protocol instead of manual TOOLS.md definitions.
 - **MCP presence notifications**: 5-second poller with 2-poll debounce pushes `person_arrived`/`person_left` log messages to Zidane via MCP, replacing file-based polling (`watcher-context.json`/`watcher-events.json`).
 - **MCP status resource**: `watcher://status` resource exposes live device state (agent_state, person_present, uptime, wifi_rssi).

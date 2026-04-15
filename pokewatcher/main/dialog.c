@@ -273,6 +273,7 @@ void pw_dialog_tick(void)
         ESP_LOGI(TAG, "Dialog dismissed by knob press (dismiss_count=%d)", s_dismiss_count);
         pw_dialog_hide();
         pw_renderer_set_state(PW_STATE_IDLE);
+        bsp_rgb_set(0, 0, 0);
         return;
     }
     if (s_knob_next) {

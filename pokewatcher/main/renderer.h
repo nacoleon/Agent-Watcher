@@ -12,6 +12,8 @@ void pw_renderer_show_message(const char *text, pw_msg_level_t level);
 void pw_renderer_wake_display(void);
 void pw_renderer_set_background(int bg_idx);
 int pw_renderer_get_background(void);
+void pw_renderer_set_auto_rotate(bool enabled);
+bool pw_renderer_get_auto_rotate(void);
 void pw_renderer_task_start(void);
 
 #endif

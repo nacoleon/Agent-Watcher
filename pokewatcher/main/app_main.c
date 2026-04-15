@@ -138,7 +138,8 @@ void app_main(void)
     // Mute speaker to prevent idle amp pops (unmute with bsp_codec_mute_set(false) when audio needed)
     bsp_codec_init();
     bsp_codec_mute_set(true);
-    ESP_LOGI(TAG, "[4/7] IO expander ready, LCD powered, speaker muted");
+    bsp_rgb_init();
+    ESP_LOGI(TAG, "[4/7] IO expander ready, LCD powered, speaker muted, RGB LED initialized");
     pw_renderer_init();
     ESP_LOGI(TAG, "[4/7] Renderer initialized");
 

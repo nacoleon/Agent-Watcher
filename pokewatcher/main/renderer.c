@@ -42,6 +42,7 @@ static int s_bg_wipe_row = 0;           // next row to invalidate
 // Auto-rotation
 static int64_t s_bg_last_rotate_ms = 0;
 #define BG_ROTATE_INTERVAL_MS  300000    // 5 minutes
+static volatile bool s_bg_auto_rotate = true;
 static int s_bg_tile_list[] = {
     1,2,3,4,5,6,7,8,10,11,12,13,15,16,17,20,24,25,27,28,29,30,31,32,33,
     34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,
@@ -432,6 +433,7 @@ static void display_sleep(void)
     if (!s_display_sleeping) {
         s_display_sleeping = true;
         bsp_lcd_brightness_set(0);
+        bsp_rgb_set(0, 0, 0);
         ESP_LOGI(TAG, "Display sleeping (idle timeout)");
     }
 }
@@ -750,6 +752,17 @@ int pw_renderer_get_background(void)
     return s_current_bg_idx;
 }
 
+void pw_renderer_set_auto_rotate(bool enabled)
+{
+    s_bg_auto_rotate = enabled;
+    ESP_LOGI(TAG, "Background auto-rotate: %s", enabled ? "ON" : "OFF");
+}
+
+bool pw_renderer_get_auto_rotate(void)
+{
+    return s_bg_auto_rotate;
+}
+
 static void renderer_task(void *arg)
 {
     ESP_LOGI(TAG, "Renderer task started");
@@ -820,7 +833,7 @@ static void renderer_task(void *arg)
         }
 
         // --- Auto-rotate background every 5 minutes ---
-        if (s_bg_available && !s_display_sleeping && !s_bg_wipe_active) {
+        if (s_bg_auto_rotate && s_bg_available && !s_display_sleeping && !s_bg_wipe_active) {
             int64_t now_ms = esp_timer_get_time() / 1000;
             if (now_ms - s_bg_last_rotate_ms >= BG_ROTATE_INTERVAL_MS) {
                 s_bg_last_rotate_ms = now_ms;
@@ -1039,6 +1052,29 @@ static void renderer_task(void *arg)
                 ESP_LOGW(TAG, "FRAME SLOW: frame=%d lock_held=%dms unlock=%dms dialog=%d typing=%d",
                     s_frame_counter, (int)lock_held_ms, (int)unlock_ms,
                     pw_dialog_is_visible(), s_msg_pending);
+            }
+
+            // RGB LED blink: flash state color for 3 frames every 50 frames (~5s at 10 FPS)
+            {
+                int blink_phase = s_frame_counter % 50;
+                if (blink_phase == 0) {
+                    // Turn on: state-specific color
+                    switch (s_current_state) {
+                        case PW_STATE_ALERT:     bsp_rgb_set(255, 0, 0);     break;  // red
+                        case PW_STATE_WAITING:   bsp_rgb_set(255, 140, 0);   break;  // orange
+                        case PW_STATE_GREETING:  bsp_rgb_set(255, 50, 100);  break;  // pink
+                        case PW_STATE_REPORTING: bsp_rgb_set(0, 255, 0);     break;  // green
+                        default: break;  // no blink for other states
+                    }
+                } else if (blink_phase == 3) {
+                    // Turn off after 3 frames (~300ms)
+                    if (s_current_state == PW_STATE_ALERT ||
+                        s_current_state == PW_STATE_WAITING ||
+                        s_current_state == PW_STATE_GREETING ||
+                        s_current_state == PW_STATE_REPORTING) {
+                        bsp_rgb_set(0, 0, 0);
+                    }
+                }
             }
 
             // Periodic alive log
