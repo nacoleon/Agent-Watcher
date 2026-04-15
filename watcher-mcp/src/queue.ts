@@ -11,7 +11,7 @@ interface QueuedMessage {
 
 let queue: QueuedMessage[] = [];
 let currentlyShowing = false;
-let lastDialogVisible = false;
+let lastDismissCount = -1;
 let server: McpServer | null = null;
 
 export function initQueue(mcpServer: McpServer): void {
@@ -27,7 +27,7 @@ export async function enqueue(
     throw new Error(`queue full (${MAX_QUEUE_SIZE} messages pending)`);
   }
 
-  if (!currentlyShowing && !lastDialogVisible) {
+  if (!currentlyShowing) {
     if (state) await watcher.setState(state);
     await watcher.sendMessage(text, level);
     currentlyShowing = true;
@@ -38,37 +38,45 @@ export async function enqueue(
   return { sent: false, queued: true, position: queue.length, pending: queue.length };
 }
 
-export async function onPoll(dialogVisible: boolean): Promise<void> {
-  if (lastDialogVisible && !dialogVisible) {
-    currentlyShowing = false;
-
-    if (server) {
-      await server.sendLoggingMessage({
-        level: "info",
-        logger: "messages",
-        data: "message_read",
-      });
-    }
-
-    if (queue.length > 0) {
-      const next = queue.shift()!;
-      try {
-        if (next.state) await watcher.setState(next.state);
-        await watcher.sendMessage(next.text, next.level);
-        currentlyShowing = true;
-      } catch {
-        queue.unshift(next);
-      }
-    } else if (server) {
-      await server.sendLoggingMessage({
-        level: "info",
-        logger: "messages",
-        data: "queue_empty",
-      });
-    }
+export async function onPoll(dismissCount: number): Promise<void> {
+  // First poll — just record the baseline
+  if (lastDismissCount < 0) {
+    lastDismissCount = dismissCount;
+    return;
   }
 
-  lastDialogVisible = dialogVisible;
+  // No new dismissals
+  if (dismissCount === lastDismissCount) return;
+
+  // One or more dismissals happened since last poll
+  const dismissals = dismissCount - lastDismissCount;
+  lastDismissCount = dismissCount;
+  currentlyShowing = false;
+
+  if (server) {
+    await server.sendLoggingMessage({
+      level: "info",
+      logger: "messages",
+      data: `message_read (${dismissals} dismissed)`,
+    });
+  }
+
+  if (queue.length > 0) {
+    const next = queue.shift()!;
+    try {
+      if (next.state) await watcher.setState(next.state);
+      await watcher.sendMessage(next.text, next.level);
+      currentlyShowing = true;
+    } catch {
+      queue.unshift(next);
+    }
+  } else if (server) {
+    await server.sendLoggingMessage({
+      level: "info",
+      logger: "messages",
+      data: "queue_empty",
+    });
+  }
 }
 
 export function getQueueState(): {

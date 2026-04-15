@@ -1,6 +1,6 @@
 # Project Status — Zidane Watcher
 
-Last updated: 2026-04-14
+Last updated: 2026-04-15
 
 ## What's Done
 
@@ -15,12 +15,12 @@ Last updated: 2026-04-14
 - Wakeup animation: 7-frame sequence plays automatically when display wakes from off, queues pending state for after
 - Anti-reversal walking: idle walk never picks opposite direction (no up→down→up jitter)
 - ZZZ overlay for sleeping: animated "z Z z" text cycling, Montserrat 28 font, follows sprite position
-- FF9 dialog box at top of screen (shows on message, auto-hides after timeout, no opacity fade)
+- FF9 dialog box at top of screen (stays until knob press dismiss, no auto-timeout)
 - Background image loading: pre-loads tile from SD card at boot, scaled to 412x412 in PSRAM
 - Background switching via PUT /api/background with web UI controls (prev/next/set)
 - Background auto-rotation every 5 min with strip wipe transition (20 rows/frame, ~2s wipe)
 - Dialog pagination: 80 chars/page, knob wheel scrolls pages, page indicator (1/3), 1000 char max
-- Knob button: short press dismisses dialog, long press (6s) reboots, press while display off wakes
+- Knob button: short press dismisses dialog + resets to idle, long press (6s) reboots, press while display off wakes
 - Display sleep: 3min idle → sleeping state → 15s later display off. Also sleeps 15s after sleeping state set via API
 - Speaker muted at boot (bsp_codec_mute_set) to prevent idle amp pops
 - Hardware-like reboot from web UI (power cycles LCD/AI chip before restart)
@@ -45,16 +45,20 @@ Last updated: 2026-04-14
 - frames.json — 16 animations (idle_down/up/left/right, walk_down/up/left/right, greeting, sleeping, working, alert, reporting, waiting, down, wakeup) with mirror flag and per-animation speed support
 - bg/ — 72 background tiles (.raw, 240x170 RGB565)
 
-### Bridge (bridge/)
-- Node.js Express on port 3847, runs as LaunchAgent
-- Tool endpoints: /tools/display_message, /tools/set_state, /tools/get_status, /tools/notify
-- Presence poller (5s, debounced) writes to ~/.openclaw/watcher-events.json
-- Context file at ~/.openclaw/watcher-context.json
+### MCP Server (watcher-mcp/)
+- Stdio MCP server, spawned by OpenClaw gateway on demand
+- Tools: display_message, set_state, get_status, notify, reboot, get_queue
+- Message queue: FIFO (max 10), states paired with messages, sends next on dismiss
+- Dismiss detection via dismiss_count counter (no polling gap bugs)
+- Presence poller (5s, 2-poll debounce) sends MCP notifications: person_arrived/person_left
+- Read confirmations: message_read/queue_empty notifications to Zidane
+- Status resource: watcher://status with live device state
 
 ### OpenClaw Integration
-- watcher.* tools registered in ~/clawd/TOOLS.md
-- Desk context in ~/clawd/HEARTBEAT.md
-- LaunchAgent: ai.openclaw.watcher-bridge
+- MCP server registered: `openclaw mcp set watcher ...`
+- Zidane auto-discovers watcher__* tools via MCP protocol
+- HEARTBEAT.md updated for MCP presence notifications
+- Old bridge (Express on port 3847) and LaunchAgent retired
 
 ## What Needs To Be Done
 
@@ -71,7 +75,7 @@ Last updated: 2026-04-14
 - [x] Double-buffered staging for SPI-safe transitions — DONE
 
 ### End-to-End Integration
-- [ ] **End-to-end bridge test** — Verify Zidane agent can call bridge tools and Watcher responds
+- [x] **End-to-end MCP test** — Zidane calls watcher__* tools via MCP, Watcher responds (verified 2026-04-15)
 - [ ] Dashboard (8091) should proxy to real Watcher (10.0.0.40) instead of mock data
 
 ### Sprite Improvements
@@ -85,10 +89,9 @@ Last updated: 2026-04-14
 - [ ] Auto-show dialog for alert/greeting/reporting states with default messages
 - [ ] Re-enable Himax when SPI issue is resolved
 
-### Bridge Improvements
-- [ ] Add /tools/reboot endpoint to bridge
-- [ ] Health monitoring — restart bridge if Watcher goes offline
-- [ ] mDNS resolution too slow for Node.js — using direct IP (10.0.0.40)
+### MCP Server Improvements
+- [ ] Adaptive polling — faster when messages are queued, slower when idle
+- [ ] Health monitoring — notify Zidane when Watcher goes offline/online
 
 ### Future Features
 - [ ] Audio/speaker output (codec initialized and muted, ready for use — unmute with `bsp_codec_mute_set(false)`)

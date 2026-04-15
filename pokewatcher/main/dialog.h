@@ -9,6 +9,7 @@ void pw_dialog_init(lv_obj_t *parent);
 void pw_dialog_show(const char *text, pw_msg_level_t level);
 void pw_dialog_hide(void);
 bool pw_dialog_is_visible(void);
+int pw_dialog_get_dismiss_count(void);
 void pw_dialog_tick(void);
 void pw_dialog_next_page(void);
 void pw_dialog_prev_page(void);

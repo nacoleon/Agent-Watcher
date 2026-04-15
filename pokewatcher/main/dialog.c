@@ -17,6 +17,7 @@ static lv_obj_t *s_name_label = NULL;
 static lv_obj_t *s_page_label = NULL;
 static bool s_visible = false;
 static int64_t s_show_time_ms = 0;
+static int s_dismiss_count = 0;
 static char s_last_text[PW_DIALOG_MAX_TEXT] = "";
 
 // Pagination state
@@ -224,6 +225,11 @@ bool pw_dialog_is_visible(void)
     return s_visible;
 }
 
+int pw_dialog_get_dismiss_count(void)
+{
+    return s_dismiss_count;
+}
+
 void pw_dialog_next_page(void)
 {
     if (!s_visible || s_total_pages <= 1) return;
@@ -263,7 +269,8 @@ void pw_dialog_tick(void)
     // Check knob input flags (set from ISR, consumed here inside LVGL lock)
     if (s_knob_pressed) {
         s_knob_pressed = false;
-        ESP_LOGI(TAG, "Dialog dismissed by knob press");
+        s_dismiss_count++;
+        ESP_LOGI(TAG, "Dialog dismissed by knob press (dismiss_count=%d)", s_dismiss_count);
         pw_dialog_hide();
         pw_renderer_set_state(PW_STATE_IDLE);
         return;

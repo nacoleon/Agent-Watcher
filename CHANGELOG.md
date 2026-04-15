@@ -8,6 +8,10 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 - **Watcher MCP server**: Stdio MCP server replaces the Express HTTP bridge for OpenClaw integration. Zidane auto-discovers `watcher__*` tools (display_message, set_state, get_status, notify, reboot) via MCP protocol instead of manual TOOLS.md definitions.
 - **MCP presence notifications**: 5-second poller with 2-poll debounce pushes `person_arrived`/`person_left` log messages to Zidane via MCP, replacing file-based polling (`watcher-context.json`/`watcher-events.json`).
 - **MCP status resource**: `watcher://status` resource exposes live device state (agent_state, person_present, uptime, wifi_rssi).
+- **MCP message queue**: Messages queue in the MCP server (FIFO, max 10) instead of overwriting. Next message sends after knob dismiss. Zidane receives `message_read`/`queue_empty` notifications. States are paired with their messages so the state only applies when that message reaches the screen.
+- **Dismiss counter**: Firmware tracks `dismiss_count` in `/api/status` — increments on every knob press dismiss. MCP server uses counter comparison instead of `dialog_visible` transitions, eliminating polling gap bugs.
+- **Knob dismiss resets to idle**: Pressing the knob to dismiss a dialog also sets agent state to idle, so Zidane doesn't stay stuck in alert/greeting pose after reading a message.
+- **`get_queue` tool**: MCP tool to check pending messages and queue state.
 - **Tool error handling**: All MCP tool handlers return descriptive `isError` responses when Watcher is offline. Notify tool reports partial failures (state set but message failed).
 - **Background index in status API**: `/api/status` now returns current background index, web UI syncs the background picker from it.
 
@@ -15,6 +19,8 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 - **OpenClaw integration**: Moved from manual HTTP bridge (Express on port 3847) to native MCP server (stdio transport, spawned by OpenClaw gateway). LaunchAgent `ai.openclaw.watcher-bridge` retired.
 - **TOOLS.md**: Removed manual watcher tool definitions — now auto-discovered via MCP.
 - **HEARTBEAT.md**: Updated Desk Context section to use MCP presence notifications instead of file polling.
+- **Dialog stays until dismissed**: Removed 10-second auto-dismiss timer. Dialog now persists until knob press.
+- **Greeting/alert no auto-revert**: Removed 10s/60s timers that auto-reverted greeting and alert states to idle. States now persist until explicitly changed (same as reporting).
 
 ## [Previous Unreleased]
 

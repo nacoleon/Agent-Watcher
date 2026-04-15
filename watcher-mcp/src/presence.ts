@@ -14,7 +14,7 @@ export function startPresencePoller(server: McpServer): void {
       updateCachedStatus(status);
 
       // Message queue dismiss detection
-      await onPoll(status.dialog_visible);
+      await onPoll(status.dismiss_count);
 
       // Presence change detection
       if (lastPresent === null) {

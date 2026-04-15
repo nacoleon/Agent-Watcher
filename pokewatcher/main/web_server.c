@@ -63,6 +63,7 @@ static esp_err_t handle_api_status(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "uptime_seconds", (double)(esp_timer_get_time() / 1000000));
     cJSON_AddNumberToObject(root, "background", pw_renderer_get_background());
     cJSON_AddBoolToObject(root, "dialog_visible", pw_dialog_is_visible());
+    cJSON_AddNumberToObject(root, "dismiss_count", pw_dialog_get_dismiss_count());
 
     wifi_ap_record_t ap_info;
     if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
