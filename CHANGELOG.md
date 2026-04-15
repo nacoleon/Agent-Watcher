@@ -12,6 +12,8 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 - **Dialog pagination**: Messages over 80 chars split into pages, scroll with physical knob wheel. Page indicator (e.g., "1/3") at bottom-right. 1000 char message limit.
 - **Knob button controls**: Short press dismisses dialog (only when visible), long press (6s) hard reboots. Button press while display is off triggers wakeup animation.
 - **Character counter in web UI**: Live count (0/1000) with yellow at 800, red at limit
+- **Background auto-rotation**: 72 curated tiles rotate every 5 minutes with strip wipe transition (20 rows/frame, ~2s top-to-bottom wipe). Double-buffered staging in PSRAM for SPI-safe transitions.
+- **Wakeup from knob button**: Press wheel button while display is off to trigger wakeup animation
 - **SPI flush retry**: SPD2010 driver retries full CASET+RASET+RAMWR sequence on SPI stall with 10ms recovery delay. LVGL flush callback signals flush_ready on retry failure to prevent permanent mutex deadlock.
 
 ### Changed
