@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { POLL_INTERVAL_MS, DEBOUNCE_COUNT } from "./config.js";
 import * as watcher from "./watcher-client.js";
 import { updateCachedStatus } from "./resources.js";
+import { onPoll } from "./queue.js";
 
 export function startPresencePoller(server: McpServer): void {
   let lastPresent: boolean | null = null;
@@ -12,6 +13,10 @@ export function startPresencePoller(server: McpServer): void {
       const status = await watcher.getStatus();
       updateCachedStatus(status);
 
+      // Message queue dismiss detection
+      await onPoll(status.dialog_visible);
+
+      // Presence change detection
       if (lastPresent === null) {
         lastPresent = status.person_present;
         return;
