@@ -1,9 +1,9 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { POLL_INTERVAL_MS, DEBOUNCE_COUNT } from "./config.js";
 import * as watcher from "./watcher-client.js";
 import { updateCachedStatus } from "./resources.js";
 
-export function startPresencePoller(server: Server): void {
+export function startPresencePoller(server: McpServer): void {
   let lastPresent: boolean | null = null;
   let debounceCounter = 0;
 
