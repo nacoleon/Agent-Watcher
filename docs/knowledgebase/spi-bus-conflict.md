@@ -100,6 +100,19 @@ fread(buffer, size, 1, file);  // BLOCKS → SPI collision → watchdog
 lvgl_port_unlock();
 ```
 
+## SPI2 Bus: SD Card vs Himax Camera — SOLVED
+
+**Root cause:** The physical SD card, once initialized into SPI mode by `esp_vfs_fat_sdspi_mount()`, does NOT tri-state its MISO output when CS (GPIO46) is deasserted. It continues driving MISO high (0xFF), preventing the Himax camera from communicating on the shared SPI2 bus.
+
+**Fix:** Power off the SD card via IO expander after loading sprites:
+```c
+bsp_sdcard_deinit_default();  // Unmount filesystem + remove SPI device
+esp_io_expander_set_level(io_exp, BSP_PWR_SDCARD, 0);  // Kill power
+gpio_set_level(BSP_SD_SPI_CS, 1);  // Hold CS high
+```
+
+This is implemented in `app_main.c` after sprite loading (step 5b). The SD card is only needed at boot for loading sprites to SPIRAM. See `himax-camera-debugging.md` Phase 8 for the full 10-experiment investigation.
+
 ## Current Renderer Architecture (after fixes)
 
 ```

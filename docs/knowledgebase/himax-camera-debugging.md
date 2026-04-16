@@ -132,10 +132,64 @@ Same BSP, same hardware, same SD card, same SPI2 bus. Differences:
 4. **Our firmware binary is larger** — more code, more memory usage
 5. **FREERTOS_HZ** — monitor uses 1000, we use default (100). Not yet tested.
 
-## Recommended Next Steps
+## Phase 8: Root Cause Found — SD Card MISO Contention (Attempts 30-40)
 
-1. **Progressively add pokewatcher features to the monitor example** — Start with monitor + web server, then + agent state, then + renderer task. Find which specific addition breaks Himax. This is the most systematic approach.
-2. **Test FREERTOS_HZ=1000** — The monitor example uses 1000Hz tick rate. Our default is 100Hz. FreeRTOS tick rate affects task scheduling timing and could impact SPI bus arbitration.
-3. **Store sprites in SPIFFS instead of SD card** — Eliminates SPI2 contention entirely. Sprites are small (~200KB total) and would fit in a flash partition.
-4. **Profile SPI2 bus activity** — Add logging to ESP-IDF SPI driver to see if our firmware generates unexpected SPI2 transactions during Himax communication.
-5. **Try removing the SD card physically** — If sprites can be loaded via web upload to SPIFFS, the SD card slot could be left empty and the camera would work.
+### Root Cause
+
+**The physical SD card, once initialized into SPI mode, does NOT tri-state its MISO output when CS is deasserted.** It continues driving MISO high (0xFF), causing bus contention with the Himax camera on the same SPI2 bus. This is a known hardware behavior of some SD cards in SPI mode.
+
+### Fix: Power Off SD Card After Loading Sprites
+
+The working sequence:
+1. Mount SD card on SPI2 (`bsp_sdcard_init_default()`)
+2. Load sprites to SPIRAM
+3. Unmount SD card (`bsp_sdcard_deinit_default()`)
+4. **Power OFF SD card** via IO expander (`BSP_PWR_SDCARD = 0`)
+5. Hold GPIO46 (SD CS) high
+6. Power cycle Himax to clear stale state
+7. Init SSCMA client → **camera works!**
+
+### Experiment Results
+
+| # | Experiment | Camera | Conclusion |
+|---|-----------|--------|------------|
+| 30 | Monitor + SD card init (`bsp_sdcard_init_default()`) | **FAIL** | SD card breaks Himax even in monitor example |
+| 31 | Monitor WITHOUT SD card init | **PASS** | Confirms SD card is the issue |
+| 32 | SD card in slot, CS held high, not initialized | **PASS** | Physical presence doesn't matter |
+| 33 | Himax CS held high during SD init | **FAIL** | Not a floating CS issue |
+| 34 | Dummy SPI device on SPI2 (no SD card traffic) | **PASS** | SPI device registration alone is fine |
+| 35 | CMD0 sent to SD card + device removed | **PASS** | Simple SPI traffic is fine |
+| 36 | Full SD mount + deinit + MISO clock flush | **FAIL** | Clock pulses don't release MISO |
+| 37 | Full SD mount + deinit + Himax power cycle | **FAIL** | Not ESP32 or Himax state issue |
+| 38 | Full SD mount + deinit + SPI2 bus free/reinit | **FAIL** | Not SPI bus state issue |
+| 39 | Himax working, then SD card mounted live | **FAIL** | Images stop immediately on mount |
+| 40 | **Full SD mount + deinit + SD POWER OFF** | **PASS** | Power off releases MISO! |
+
+### Key Insight from Experiment 39
+
+Camera was running at 10 FPS. SD card was mounted at runtime. **All image flow stopped immediately.** The SD card mount disrupted SPI2 bus mid-stream. After SD deinit, images did NOT resume — proving the SD card physically holds MISO even after ESP32 releases it.
+
+### Remaining Issue: SSCMA Library Heap Crash
+
+The SPI2 fix works — Himax connects (`on_connect` fires), but the SSCMA client library crashes in `mapping_insert` (`tlsf.c:266`) — a heap corruption in the TLSF allocator. This happens because:
+
+1. Himax has a person detection model in its flash that auto-runs on power-up
+2. The SSCMA monitor/process tasks start receiving unsolicited inference events
+3. The library's reply parser can't match these to any pending request
+4. Sustained flood of "request not found: MODEL" warnings
+5. Heap corruption → Guru Meditation Error (LoadProhibited)
+
+This is a bug in the SSCMA library's handling of unsolicited events, NOT an SPI2 issue.
+
+### Potential Solutions for the Heap Crash
+
+1. **Patch SSCMA library** to safely discard unsolicited events without heap corruption
+2. **Flash Himax with no-autorun firmware** so it boots clean without inference
+3. **Drain the SPI RX buffer** before SSCMA internal tasks start (requires library modification)
+4. **Use SPIFFS instead of SD card** — eliminates the need for SPI2 bus sharing entirely
+
+## Updated Status
+
+- **SPI2 bus conflict: SOLVED** — Power off SD card after loading sprites
+- **SSCMA heap crash: OPEN** — Library bug when handling stale autorun data
+- **Himax communication: WORKING** — `on_connect` fires, model info retrieved successfully

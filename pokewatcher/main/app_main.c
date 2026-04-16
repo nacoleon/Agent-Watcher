@@ -169,6 +169,31 @@ void app_main(void)
         ESP_LOGW(TAG, "Failed to load Zidane sprites from SD card");
     }
 
+    // [5b/7] SD card done — unmount and power off to free SPI2 MISO for Himax
+    // Root cause: SD card in SPI mode doesn't tri-state MISO when CS is high,
+    // causing bus contention with Himax camera on the same SPI2 bus.
+    // Fix: power off SD card after loading sprites so it physically releases MISO.
+    bsp_sdcard_deinit_default();
+    esp_io_expander_set_dir(bsp_io_expander_init(), BSP_PWR_SDCARD, IO_EXPANDER_OUTPUT);
+    esp_io_expander_set_level(bsp_io_expander_init(), BSP_PWR_SDCARD, 0);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    // Hold SD CS high to prevent any stray bus activity
+    gpio_config_t sd_cs_conf = {
+        .pin_bit_mask = (1ULL << BSP_SD_SPI_CS),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    gpio_config(&sd_cs_conf);
+    gpio_set_level(BSP_SD_SPI_CS, 1);
+    // Also power cycle Himax to clear stale inference data from previous session
+    esp_io_expander_handle_t io_exp = bsp_io_expander_init();
+    esp_io_expander_set_dir(io_exp, BSP_PWR_AI_CHIP, IO_EXPANDER_OUTPUT);
+    esp_io_expander_set_level(io_exp, BSP_PWR_AI_CHIP, 0);  // Power OFF Himax
+    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_io_expander_set_level(io_exp, BSP_PWR_AI_CHIP, 1);  // Power ON Himax
+    vTaskDelay(pdMS_TO_TICKS(500));  // Wait for Himax boot
+    ESP_LOGI(TAG, "[5b/7] SD powered off + Himax power cycled — SPI2 MISO free");
+
     // [7/7] WiFi + web server
     init_wifi();
     pw_web_server_start();
@@ -178,7 +203,11 @@ void app_main(void)
     pw_agent_state_set_change_cb(on_state_changed);
 
     // Start tasks
-    // pw_himax_task_start();  // BLOCKED: works without SD card, fails with. See himax-camera-debugging.md
+    // pw_himax_task_start();  // SPI2 fix works (SD card powered off) but SSCMA library
+    // crashes in heap allocator (tlsf.c:266) when processing stale autorun data from
+    // Himax's previous session. Need to either: (a) flash Himax with no-autorun firmware,
+    // (b) patch SSCMA library's reply parsing to handle unsolicited events safely, or
+    // (c) find a way to drain the RX buffer before SSCMA internal tasks start.
     pw_agent_state_task_start();
     pw_renderer_task_start();
 

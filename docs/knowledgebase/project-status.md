@@ -29,7 +29,8 @@ Last updated: 2026-04-16
 - API endpoints: GET /api/status, PUT /api/agent-state, POST /api/message, POST /api/reboot, PUT /api/background, POST /api/heartbeat
 - Web UI at http://10.0.0.40 with state buttons (including "down", "wakeup"), message input, background controls, heartbeat log, reboot
 - WiFi auto-connect (YOUR_WIFI_SSID, IP: 10.0.0.40, mDNS: zidane.local)
-- Himax camera disabled (SPI collision with LCD confirmed via diagnostic logs)
+- Himax camera SPI2 fix: SD card powered off after sprite loading frees MISO for Himax
+- Himax camera blocked by SSCMA library heap crash (stale autorun data — see himax-camera-debugging.md)
 - SPI-safe renderer: prepare/commit split, single LVGL lock per frame (500ms timeout), dirty flags
 
 ### Dashboard Preview (zidane-dashboard/)

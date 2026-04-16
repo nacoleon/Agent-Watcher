@@ -16,6 +16,7 @@ static const char *TAG = "pw_himax";
 static bool s_person_present = false;
 static int64_t s_last_person_seen_ms = 0;
 static volatile bool s_himax_paused = false;
+static volatile bool s_himax_ready = false;
 static sscma_client_handle_t s_client = NULL;
 
 static void process_detection(bool person_detected)
@@ -42,6 +43,7 @@ static void process_detection(bool person_detected)
 
 static void on_event(sscma_client_handle_t client, const sscma_client_reply_t *reply, void *user_ctx)
 {
+    if (!s_himax_ready) return;  // Ignore stale data before init complete
     sscma_client_box_t *boxes = NULL;
     int num_boxes = 0;
     esp_err_t err = sscma_utils_fetch_boxes_from_reply(reply, &boxes, &num_boxes);
@@ -82,41 +84,16 @@ static void himax_task(void *arg)
         return;
     }
 
+    // Match the monitor example's init sequence exactly — no delays
     sscma_client_callback_t callback = {
         .on_event = on_event,
         .on_log = on_log,
         .on_connect = on_connect,
     };
     sscma_client_register_callback(client, &callback, NULL);
-
-    // Wait for Himax boot — monitor example uses 3s
-    ESP_LOGI(TAG, "Waiting 3s for Himax boot...");
-    vTaskDelay(pdMS_TO_TICKS(3000));
-
     s_client = client;
 
-    // Init — hardware reset (stops any auto-running inference)
-    esp_err_t init_err = sscma_client_init(client);
-    ESP_LOGI(TAG, "sscma_client_init: 0x%x (%s)", init_err, esp_err_to_name(init_err));
-
-    // Wait for chip to stabilize after reset, then stop any stale inference
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    sscma_client_break(client);
-    vTaskDelay(pdMS_TO_TICKS(500));
-
-    // Flush stale data from RX buffer
-    ESP_LOGI(TAG, "Flushing stale data...");
-    for (int i = 0; i < 20; i++) {
-        size_t avail = 0;
-        sscma_client_available(client, &avail);
-        if (avail == 0) break;
-        char discard[256];
-        size_t to_read = avail > sizeof(discard) ? sizeof(discard) : avail;
-        sscma_client_read(client, discard, to_read);
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
-    ESP_LOGI(TAG, "RX buffer flushed");
-
+    sscma_client_init(client);
     sscma_client_set_model(client, 1);
 
     sscma_client_info_t *info = NULL;
@@ -135,14 +112,11 @@ static void himax_task(void *arg)
     sscma_client_set_sensor(client, 1, 1, true);
     vTaskDelay(pdMS_TO_TICKS(50));
 
+    s_himax_ready = true;
     ESP_LOGI(TAG, "Starting inference...");
-    esp_err_t invoke_err = sscma_client_invoke(client, -1, false, false);
-    if (invoke_err != ESP_OK) {
-        ESP_LOGE(TAG, "invoke failed: 0x%x", invoke_err);
-        vTaskDelete(NULL);
-        return;
+    if (sscma_client_invoke(client, -1, false, false) != ESP_OK) {
+        ESP_LOGE(TAG, "invoke failed");
     }
-
     ESP_LOGI(TAG, "Person detection running");
 
     while (1) {
