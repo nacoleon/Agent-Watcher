@@ -211,7 +211,29 @@ The Himax chip doesn't respond to:
 **Result:** Same timeout. Chip still doesn't respond to AT commands or OTA entry.
 **Conclusion:** Power cycling doesn't help. The chip powers on but its SSCMA application firmware doesn't start the AT command handler.
 
+### 23. No SD card + WiFi — CAMERA WORKS (2026-04-16)
+**What:** Disabled init_sdcard() entirely. Kept WiFi + renderer + all other tasks.
+**Result:** `on_connect` fires! Himax responds! RX buffer floods with inference data. Camera is alive.
+**Conclusion:** SD CARD ON SPI2 IS THE ROOT CAUSE.
+
+### 24-28. Various SD card coexistence attempts (2026-04-16)
+**Tried:** Mount+unmount, BSP init (20MHz vs 400kHz), SSCMA before SD, keep mounted, monitor sdkconfig.
+**Result:** All fail. Any SD card activity on SPI2 permanently breaks Himax SPI communication.
+
+### 29. Built sscma_client_monitor example (2026-04-16)
+**What:** Built and ran SDK's sscma_client_monitor example with SD card + Himax on same SPI2 bus.
+**Result:** WORKS. Person detection at 10 FPS, SD card mounted, LCD running.
+**Conclusion:** BSP and hardware are fine. Something unique to our firmware's runtime behavior breaks SPI2 bus sharing.
+
+## ROOT CAUSE: SD Card on SPI2 Breaks Himax — Only In Our Firmware
+
+**Works:** Stock firmware, monitor example, our firmware without SD card
+**Fails:** Our firmware with SD card (any config, any init order, any sdkconfig)
+
+The monitor example uses identical BSP code, same SPI2 bus, same SD card init. The only difference is our application code's runtime behavior.
+
 ## Recommended Next Steps
 
-1. **Build the sscma_client_monitor example** — The simplest camera example in the SDK. Build it, flash it, see if camera works. If yes, diff everything line by line. This is the definitive test.
-2. **Check if stock firmware changed the Himax firmware** — When we tested stock V1.1.7, it may have OTA-updated the Himax to a different firmware version that only responds to the stock firmware's protocol (not the open-source SSCMA AT protocol).
+1. **Progressively add pokewatcher features to the monitor example** — Start with monitor + web server, then + agent state, then + renderer task. Find which addition breaks Himax.
+2. **Store sprites in SPIFFS instead of SD card** — Eliminates SPI2 contention entirely.
+3. **Profile SPI2 bus activity** — Add logging to the ESP-IDF SPI driver to see if our firmware generates unexpected SPI2 transactions from the SD card driver during Himax communication.

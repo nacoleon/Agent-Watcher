@@ -74,14 +74,13 @@ static void init_wifi(void)
     }
 }
 
+static sdmmc_card_t *s_sd_card = NULL;
+
 static void init_sdcard(void)
 {
-
-    // Try to mount regardless of detect pin — some cards don't trigger it
-    // Mount SD card via SPI (same as bsp_sdcard_init but without ESP_ERROR_CHECK)
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     host.slot = BSP_SD_SPI_NUM;
-    host.max_freq_khz = 400;  // Slow down for old SD v1 cards
+    host.max_freq_khz = 400;
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_config.gpio_cs = BSP_SD_SPI_CS;
     slot_config.host_id = host.slot;
@@ -91,16 +90,28 @@ static void init_sdcard(void)
         .allocation_unit_size = 16 * 1024,
     };
 
-    sdmmc_card_t *card = NULL;
-    esp_err_t ret = esp_vfs_fat_sdspi_mount(PW_SD_MOUNT_POINT, &host, &slot_config, &mount_config, &card);
+    esp_err_t ret = esp_vfs_fat_sdspi_mount(PW_SD_MOUNT_POINT, &host, &slot_config, &mount_config, &s_sd_card);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to mount SD card: %s (0x%x)", esp_err_to_name(ret), ret);
         ESP_LOGW(TAG, "Continuing without SD card — sprites won't load");
+        s_sd_card = NULL;
     } else {
         ESP_LOGI(TAG, "SD card mounted at %s", PW_SD_MOUNT_POINT);
-        sdmmc_card_print_info(stdout, card);
+        sdmmc_card_print_info(stdout, s_sd_card);
     }
 }
+
+static void deinit_sdcard(void)
+{
+    if (s_sd_card) {
+        esp_vfs_fat_sdcard_unmount(PW_SD_MOUNT_POINT, s_sd_card);
+        s_sd_card = NULL;
+        ESP_LOGI(TAG, "SD card unmounted — SPI2 free for Himax");
+    }
+}
+
+// SSCMA client handle — created before SD card, used by himax task
+sscma_client_handle_t s_sscma_client = NULL;
 
 static void on_state_changed(pw_agent_state_t old_state, pw_agent_state_t new_state)
 {
@@ -147,11 +158,13 @@ void app_main(void)
     pw_renderer_init();
     ESP_LOGI(TAG, "[4/7] Renderer initialized");
 
-    // [5/7] SD card
-    init_sdcard();
+    // [5/7] SD card — use BSP init (same as monitor example)
+    esp_err_t sd_err = bsp_sdcard_init_default();
+    if (sd_err != ESP_OK) {
+        ESP_LOGW(TAG, "SD card init failed: %s — continuing without sprites", esp_err_to_name(sd_err));
+    }
     ESP_LOGI(TAG, "[5/7] SD card initialized");
 
-    // [6/7] Load Zidane character
     if (!pw_renderer_load_character("zidane")) {
         ESP_LOGW(TAG, "Failed to load Zidane sprites from SD card");
     }
@@ -165,7 +178,7 @@ void app_main(void)
     pw_agent_state_set_change_cb(on_state_changed);
 
     // Start tasks
-    // pw_himax_task_start();  // DISABLED: 22 attempts — see docs/knowledgebase/himax-camera-debugging.md
+    // pw_himax_task_start();  // BLOCKED: works without SD card, fails with. See himax-camera-debugging.md
     pw_agent_state_task_start();
     pw_renderer_task_start();
 
