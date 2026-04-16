@@ -88,7 +88,7 @@ Last updated: 2026-04-16
 - [ ] Remove debug logging from prepare_frame/commit_frame (s_prepare_call_count, s_commit_call_count)
 - [ ] Remove heap monitoring logs (s_heap_log_counter)
 - [ ] Auto-show dialog for alert/greeting/reporting states with default messages
-- [ ] Re-enable Himax when SPI issue is resolved
+- [ ] Re-enable Himax camera — BLOCKED by SD card SPI2 bus conflict. Camera works without SD card. 29 attempts documented in `docs/knowledgebase/himax-camera-debugging.md`. Next: progressively add features to monitor example to isolate the conflict.
 
 ### MCP Server Improvements
 - [ ] Adaptive polling — faster when messages are queued, slower when idle

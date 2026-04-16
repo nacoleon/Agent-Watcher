@@ -9,7 +9,10 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 - **Background auto-rotate toggle**: Web UI button and API field (`auto_rotate`) to pause/resume the 5-minute background rotation.
 - **OpenClaw heartbeat**: `POST /api/heartbeat` endpoint and `watcher__heartbeat` MCP tool. Watcher switches to "down" state if no heartbeat received for 1.5 hours, auto-recovers to idle on next beat. Web UI shows heartbeat status and last 5 heartbeat timestamps.
 - **Presence logging**: Agent state tracks presence events (arrived/left) with timestamps, exposed in `/api/status` and web UI.
-- **Himax person detection**: Re-enabled SSCMA client task for person detection with 2-poll debounce. Detects person → wakes display + sets idle. Person leaves (60s timeout) → logs departure.
+- **Himax person detection infrastructure**: 60s time-based debounce, wake display on person arrive, sleep on person leave (if idle + no dialog), presence event log in web UI. Camera disabled pending SD card SPI2 bus conflict resolution — see `docs/knowledgebase/himax-camera-debugging.md`.
+- **Himax auto-flash from SD card**: OTA flash logic reads firmware.img + person.tflite from `/sdcard/himax/` if chip doesn't respond. SD card files prepared in `sdcard_prep/himax/`.
+- **CPU frequency fix**: Corrected sdkconfig key from `CONFIG_ESP_DEFAULT_CPU_FREQ_240` to `CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240` — was silently running at 160MHz instead of 240MHz.
+- **SD card init switched to BSP**: Uses `bsp_sdcard_init_default()` (20MHz, same as stock) instead of custom init at 400kHz.
 
 ### Changed
 - **Dialog box redesigned**: Larger (340×170 max), auto-heights to content, Montserrat 22 font (was 14), 95 chars per page (was 80). Page indicator gets reserved space at bottom to prevent text overlap.
@@ -18,9 +21,10 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 - **Sleep/down states don't wake display**: External state changes to sleeping or down no longer wake the display. Prevents spurious wake after sleep timeout.
 - **Button wake doesn't dismiss dialog**: Pressing the knob while display is off now only wakes the screen. A second press is needed to dismiss the dialog.
 - **Sleeping position with dialog**: When a dialog is open, sleeping/down states position the sprite at bottom-center (visible below dialog) instead of center.
+- **sdkconfig simplified**: Removed DMA bounce buffer, removed SPI_MASTER_IN_IRAM, removed SSCMA task overrides, removed LVGL affinity settings. Minimal config matching monitor example + memory reserves.
 
 ### Fixed
-- **SPI flush stall / fractal lines (root cause found and fixed)**: Error 0x101 was `ESP_ERR_NO_MEM` — LVGL draw buffers in PSRAM need DMA bounce buffers in internal SRAM, which the Himax SSCMA client fragments at runtime. Fix: pre-allocated 33KB DMA bounce buffer at boot, custom LVGL flush callback copies PSRAM→DMA→SPI. No runtime DMA allocation, works with Himax camera running. Zero visual impact.
+- **SPI flush stall / fractal lines (root cause found and fixed)**: Error 0x101 was `ESP_ERR_NO_MEM` — LVGL draw buffers in PSRAM require DMA bounce buffers in internal SRAM. Fix: `CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=262144` reserves 256KB internal for DMA. DMA bounce buffer pre-allocation removed (stock BSP approach works).
 
 ### Previous Unreleased
 
