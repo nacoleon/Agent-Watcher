@@ -143,8 +143,13 @@ void app_main(void)
     bsp_codec_mute_set(true);
     bsp_rgb_init();
     ESP_LOGI(TAG, "[4/7] IO expander ready, LCD powered, speaker muted, RGB LED initialized");
+
     pw_renderer_init();
     ESP_LOGI(TAG, "[4/7] Renderer initialized");
+
+    // Init Himax SSCMA client AFTER renderer — renderer allocates DMA bounce buffer
+    // from unfragmented heap. SSCMA registration on SPI2 can fragment DMA memory.
+    pw_himax_early_init();
 
     // [5/7] SD card
     init_sdcard();
@@ -164,7 +169,7 @@ void app_main(void)
     pw_agent_state_set_change_cb(on_state_changed);
 
     // Start tasks
-    // pw_himax_task_start();  // DISABLED: Himax chip not responding (get_info timeout). Needs firmware flash via UART.
+    pw_himax_task_start();  // Auto-flashes firmware + person model from SD card if Himax not responding
     pw_agent_state_task_start();
     pw_renderer_task_start();
 

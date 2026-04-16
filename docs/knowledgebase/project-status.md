@@ -65,8 +65,8 @@ Last updated: 2026-04-16
 ## What Needs To Be Done
 
 ### SPI Flush Issue (RESOLVED)
-- [x] **Root cause found** — Error 0x101 was `ESP_ERR_NO_MEM` (DMA bounce buffer allocation failure), NOT `ESP_ERR_INVALID_STATE`. LVGL draw buffers in PSRAM require DMA bounce buffers in internal SRAM; SPI chunks exceeded available contiguous DMA memory.
-- [x] **Fix applied** — `CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=12` (chunks ~28KB, fits in available ~31KB DMA blocks) + `CONFIG_LVGL_DRAW_BUFF_HEIGHT=40` (render in 40-row strips). See `docs/knowledgebase/spi-flush-stall-bug.md`
+- [x] **Root cause found** — Error 0x101 was `ESP_ERR_NO_MEM` (DMA bounce buffer allocation failure). LVGL draw buffers in PSRAM need DMA bounce buffers in internal SRAM; Himax SSCMA client fragments the DMA heap at runtime.
+- [x] **Fix applied** — Pre-allocated 33KB DMA bounce buffer at boot (before SSCMA init). Custom LVGL flush callback copies PSRAM→DMA buffer→SPI. No runtime DMA allocation needed. Works with Himax camera running.
 - [x] **lvgl_port_lock timeout** — 500ms timeout (safety net, rarely triggered now)
 
 ### Background Images

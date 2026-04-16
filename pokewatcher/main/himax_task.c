@@ -17,6 +17,28 @@ static bool s_person_present = false;
 static int64_t s_last_person_seen_ms = 0;
 static volatile bool s_himax_paused = false;
 static sscma_client_handle_t s_client = NULL;
+static sscma_client_handle_t s_early_client = NULL;
+
+// Call early in app_main BEFORE SD card init — registers Himax on SPI2 bus first
+void pw_himax_early_init(void)
+{
+    s_early_client = bsp_sscma_client_init();
+    if (s_early_client) {
+        ESP_LOGI(TAG, "SSCMA client created (early init, before SD card)");
+    } else {
+        ESP_LOGE(TAG, "Failed to create SSCMA client");
+    }
+}
+
+static void on_log(sscma_client_handle_t client, const sscma_client_reply_t *reply, void *user_ctx)
+{
+    ESP_LOGI(TAG, "on_log: %.*s", (int)reply->len, reply->data);
+}
+
+static void on_connect(sscma_client_handle_t client, const sscma_client_reply_t *reply, void *user_ctx)
+{
+    ESP_LOGI(TAG, "on_connect callback fired");
+}
 
 static void process_detection(bool person_detected)
 {
@@ -67,74 +89,111 @@ static void on_event(sscma_client_handle_t client, const sscma_client_reply_t *r
 
 static void himax_task(void *arg)
 {
-    ESP_LOGI(TAG, "Himax task started, initializing SSCMA client...");
+    ESP_LOGI(TAG, "Himax task started");
 
-    // Use BSP function — handles SPI bus, IO expander, GPIO, and reset
-    sscma_client_handle_t client = bsp_sscma_client_init();
+    // Use client from early init (created before SD card to avoid SPI2 bus contention)
+    sscma_client_handle_t client = s_early_client;
     if (client == NULL) {
-        ESP_LOGE(TAG, "Failed to initialize SSCMA client");
+        ESP_LOGE(TAG, "No SSCMA client — pw_himax_early_init() not called or failed");
         vTaskDelete(NULL);
         return;
     }
 
-    // Register callback for detection events
+    // Register all callbacks for diagnostics
     sscma_client_callback_t callback = {
         .on_event = on_event,
+        .on_log = on_log,
+        .on_connect = on_connect,
     };
     sscma_client_register_callback(client, &callback, NULL);
-    ESP_LOGI(TAG, "Callback registered, waiting 3s for Himax boot...");
 
-    // Wait for Himax to boot (it outputs noise initially)
+    // Wait for Himax to boot
+    ESP_LOGI(TAG, "Waiting 3s for Himax boot...");
     vTaskDelay(pdMS_TO_TICKS(3000));
 
     s_client = client;
-    ESP_LOGI(TAG, "Calling sscma_client_init...");
 
-    // Initialize the SSCMA client (handshake with Himax chip)
+    // Check sync pin state before and after reset
+    // Sync pin = IO expander pin 6 (BSP_SSCMA_CLIENT_SPI_SYNC)
+    uint8_t sync = bsp_exp_io_get_level(IO_EXPANDER_PIN_NUM_6);
+    ESP_LOGI(TAG, "Sync pin BEFORE reset: %d", sync);
+
+    // Hardware reset + handshake (matches stock firmware sequence)
     esp_err_t init_err = sscma_client_init(client);
-    ESP_LOGI(TAG, "sscma_client_init returned: 0x%x (%s)", init_err, esp_err_to_name(init_err));
+    ESP_LOGI(TAG, "sscma_client_init: 0x%x (%s)", init_err, esp_err_to_name(init_err));
 
-    // Query device info
-    ESP_LOGI(TAG, "Querying device info...");
+    // Check sync pin after reset — should go HIGH if chip has firmware and is ready
+    for (int i = 0; i < 10; i++) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        sync = bsp_exp_io_get_level(IO_EXPANDER_PIN_NUM_6);
+        ESP_LOGI(TAG, "Sync pin %.1fs after reset: %d", (i + 1) * 0.5f, sync);
+        if (sync) break;
+    }
+
+    // Send raw AT command and poll for response
+    const char *at_cmd = "\r\nAT+ID?\r\n";
+    ESP_LOGI(TAG, "Sending raw AT+ID? command...");
+    esp_err_t write_err = sscma_client_write(client, at_cmd, strlen(at_cmd));
+    ESP_LOGI(TAG, "write() returned: 0x%x (%s)", write_err, esp_err_to_name(write_err));
+
+    // Poll for response over 5 seconds
+    for (int i = 0; i < 25; i++) {
+        vTaskDelay(pdMS_TO_TICKS(200));
+        size_t avail = 0;
+        sscma_client_available(client, &avail);
+        if (avail > 0) {
+            char buf[256] = {0};
+            size_t to_read = avail > sizeof(buf) - 1 ? sizeof(buf) - 1 : avail;
+            sscma_client_read(client, buf, to_read);
+            buf[to_read] = '\0';
+            ESP_LOGI(TAG, "Response (%zu bytes): %s", to_read, buf);
+            break;
+        }
+        if (i % 5 == 4) {
+            ESP_LOGI(TAG, "  still waiting... (%ds)", (i + 1) / 5);
+        }
+    }
+
+    // Select person detection model (model ID 1 at 0x400000)
+    sscma_client_set_model(client, 1);
+
+    // Query device info to verify chip is responding
     sscma_client_info_t *info = NULL;
     esp_err_t info_err = sscma_client_get_info(client, &info, true);
-    ESP_LOGI(TAG, "get_info returned: 0x%x (%s)", info_err, esp_err_to_name(info_err));
     if (info_err == ESP_OK && info) {
-        ESP_LOGI(TAG, "Himax ID: %s, name: %s, hw_ver: %s, fw_ver: %s",
-                 info->id ? info->id : "null",
-                 info->name ? info->name : "null",
-                 info->hw_ver ? info->hw_ver : "null",
-                 info->fw_ver ? info->fw_ver : "null");
+        ESP_LOGI(TAG, "Himax: id=%s name=%s fw=%s",
+                 info->id ? info->id : "?",
+                 info->name ? info->name : "?",
+                 info->fw_ver ? info->fw_ver : "?");
+    } else {
+        ESP_LOGE(TAG, "Himax not responding: 0x%x (%s) — chip may need firmware flash",
+                 info_err, esp_err_to_name(info_err));
+        vTaskDelete(NULL);
+        return;
     }
 
-    // Query model info
-    ESP_LOGI(TAG, "Querying model info...");
-    sscma_client_model_t *model = NULL;
-    esp_err_t model_err = sscma_client_get_model(client, &model, true);
-    ESP_LOGI(TAG, "get_model returned: 0x%x (%s)", model_err, esp_err_to_name(model_err));
-    if (model_err == ESP_OK && model) {
-        ESP_LOGI(TAG, "Model ID: %d, uuid: %s, name: %s",
-                 model->id,
-                 model->uuid ? model->uuid : "null",
-                 model->name ? model->name : "null");
-    }
+    // Configure sensor (416x416 resolution)
+    sscma_client_set_sensor(client, 1, 1, true);
+    vTaskDelay(pdMS_TO_TICKS(50));
 
-    // Start continuous inference on the Himax chip
-    ESP_LOGI(TAG, "Starting continuous inference...");
+    // Start continuous inference
+    ESP_LOGI(TAG, "Starting inference...");
     esp_err_t invoke_err = sscma_client_invoke(client, -1, false, false);
-    ESP_LOGI(TAG, "sscma_client_invoke returned: 0x%x (%s)", invoke_err, esp_err_to_name(invoke_err));
+    if (invoke_err != ESP_OK) {
+        ESP_LOGE(TAG, "invoke failed: 0x%x (%s)", invoke_err, esp_err_to_name(invoke_err));
+        vTaskDelete(NULL);
+        return;
+    }
 
-    ESP_LOGI(TAG, "Himax detection running");
+    ESP_LOGI(TAG, "Person detection running");
 
     // Keep task alive — handle pause/resume for SPI arbitration
     while (1) {
         if (s_himax_paused) {
-            // Stop inference while LCD needs SPI bus
             sscma_client_break(client);
             while (s_himax_paused) {
                 vTaskDelay(pdMS_TO_TICKS(10));
             }
-            // Restart inference
             sscma_client_invoke(client, -1, false, false);
             ESP_LOGI(TAG, "Himax resumed");
         }
@@ -145,7 +204,6 @@ static void himax_task(void *arg)
 void pw_himax_pause(void)
 {
     s_himax_paused = true;
-    // Give Himax task time to stop inference
     vTaskDelay(pdMS_TO_TICKS(150));
 }
 

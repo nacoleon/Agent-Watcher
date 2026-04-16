@@ -20,7 +20,7 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 - **Sleeping position with dialog**: When a dialog is open, sleeping/down states position the sprite at bottom-center (visible below dialog) instead of center.
 
 ### Fixed
-- **SPI flush stall / fractal lines (root cause found and fixed)**: Error 0x101 was `ESP_ERR_NO_MEM`, not `ESP_ERR_INVALID_STATE` as previously documented. LVGL draw buffers in PSRAM require DMA bounce buffers in internal SRAM; the default SPI chunk size (32KB) exceeded available contiguous DMA memory (~25-31KB). Fix: `CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=12` reduces chunks to ~28KB, `CONFIG_LVGL_DRAW_BUFF_HEIGHT=40` renders in 40-row strips. Zero visual impact — same image quality, just smaller DMA transfers. Eliminates all display corruption and freeze issues.
+- **SPI flush stall / fractal lines (root cause found and fixed)**: Error 0x101 was `ESP_ERR_NO_MEM` — LVGL draw buffers in PSRAM need DMA bounce buffers in internal SRAM, which the Himax SSCMA client fragments at runtime. Fix: pre-allocated 33KB DMA bounce buffer at boot, custom LVGL flush callback copies PSRAM→DMA→SPI. No runtime DMA allocation, works with Himax camera running. Zero visual impact.
 
 ### Previous Unreleased
 

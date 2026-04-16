@@ -29,17 +29,34 @@ The chunk size (32KB) exceeded the largest contiguous DMA block (25-31KB) every 
 
 ## The Fix
 
-Two `sdkconfig.defaults` changes:
+**Pre-allocated DMA bounce buffer** in `renderer.c` — the proper fix that works with all SPI devices running.
 
-```ini
-CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=12    # Split SPI transfers into ~28KB chunks (fits in available DMA blocks)
-CONFIG_LVGL_DRAW_BUFF_HEIGHT=40       # Render in 40-row strips instead of full 412-row screen
+At boot (before any SPI device fragments the heap), we allocate a 33KB DMA-capable buffer in internal SRAM. The LVGL flush callback is overridden to memcpy pixel data from PSRAM into this buffer, then pass it to `esp_lcd_panel_draw_bitmap`. The SPI driver sees DMA-capable memory and skips its internal bounce buffer allocation entirely.
+
+```c
+// In renderer.c — allocated at boot before SSCMA/Himax init
+#define DMA_BOUNCE_SIZE (412 * 40 * sizeof(lv_color_t))  // 32960 bytes
+s_dma_bounce = heap_caps_malloc(DMA_BOUNCE_SIZE, MALLOC_CAP_DMA);
+
+// Custom flush callback replaces BSP's default
+static void dma_bounce_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map) {
+    memcpy(s_dma_bounce, color_map, size);
+    esp_lcd_panel_draw_bitmap(panel, x1, y1, x2+1, y2+1, s_dma_bounce);
+    // BSP's on_color_trans_done ISR handles lv_disp_flush_ready
+}
 ```
 
-- `CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=12` reduces `max_transfer_sz` from 340KB to ~28KB, which is below both the 32KB hardware DMA limit and the available contiguous DMA memory (~31KB).
-- `CONFIG_LVGL_DRAW_BUFF_HEIGHT=40` makes LVGL render in strips of 40 rows (412×40×2 = ~33KB), flushing more often with smaller regions. No visual difference — same pixels, just sent in smaller pieces.
+Supporting `sdkconfig.defaults`:
+```ini
+CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=24   # Keep SPI chunks small as additional safety
+CONFIG_LVGL_DRAW_BUFF_HEIGHT=40      # Render in 40-row strips (must fit in DMA bounce buffer)
+```
 
-**No image quality impact.** The display renders identically; only the internal transfer chunk size changed.
+**Why this works:** The DMA bounce buffer is a reserved parking spot — no matter how much the Himax SSCMA client fragments the remaining heap, our buffer is already allocated and guaranteed available.
+
+**Why the previous fix (DIV=12 alone) broke:** When the Himax camera task was re-enabled, its SSCMA SPI client on SPI2 allocated and freed DMA buffers continuously, fragmenting internal SRAM. Even small SPI chunks (14KB with DIV=24) couldn't find contiguous blocks because `DMA_largest` dropped to 3-15KB.
+
+**No image quality impact.** Same pixels, just copied through a dedicated buffer before SPI transfer.
 
 ## What We Tried (and why it didn't work)
 
