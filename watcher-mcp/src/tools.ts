@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { VALID_STATES } from "./config.js";
 import * as watcher from "./watcher-client.js";
 import { enqueue, getQueueState } from "./queue.js";
+import { log } from "./logger.js";
 
 function error(msg: string) {
   return { content: [{ type: "text" as const, text: msg }], isError: true };
@@ -37,9 +38,13 @@ export function registerTools(server: McpServer): void {
       },
     },
     async ({ text, state, level }: { text: string; state: string; level: string }) => {
+      log("tool", "display_message", { state, level, text: text.slice(0, 80) });
       try {
-        return ok(await enqueue(text, level, state));
+        const result = await enqueue(text, level, state);
+        log("tool", "display_message result", result);
+        return ok(result);
       } catch (err: any) {
+        log("error", "display_message failed", { error: err.message });
         return error(err.message);
       }
     }
@@ -59,9 +64,12 @@ export function registerTools(server: McpServer): void {
       },
     },
     async ({ state }: { state: string }) => {
+      log("tool", "set_state", { state });
       try {
-        return ok(await watcher.setState(state));
+        const result = await watcher.setState(state);
+        return ok(result);
       } catch (err: any) {
+        log("error", "set_state failed", { state, error: err.message });
         return error(`Watcher error: ${err.message}`);
       }
     }
@@ -122,9 +130,13 @@ export function registerTools(server: McpServer): void {
         "while in 'down' state auto-recovers to idle.",
     },
     async () => {
+      log("heartbeat", "sending");
       try {
-        return ok(await watcher.heartbeat());
+        const result = await watcher.heartbeat();
+        log("heartbeat", "ok", result);
+        return ok(result);
       } catch (err: any) {
+        log("heartbeat", "FAILED — watcher unreachable", { error: err.message });
         return error(`Watcher error: ${err.message}`);
       }
     }

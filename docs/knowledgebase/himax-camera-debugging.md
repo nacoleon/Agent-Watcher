@@ -98,10 +98,82 @@ Applied all stock settings. Full rebuild with clean sdkconfig.
 - **AT protocol**: Commands like `\r\nAT+ID?\r\n`, responses wrapped in `\r{...}\n` JSON.
 - **Process task**: Internal SSCMA task polls `available()` every 10ms, reads data, parses JSON, matches to pending requests.
 
-## Next Step
+### 11. OTA firmware flash from SD card (2026-04-16)
+**What:** Added auto-flash logic: if `get_info` times out, call `bsp_sscma_flasher_init()` then `sscma_client_ota_start()` to flash `firmware.img` at 0x000000 from SD card.
+**Result:** `sscma_client_ota_start` failed — the SPI flasher timed out trying to communicate with the Himax bootloader. Error: `sscma_client.flasher.we2.spi: Timeout` at the `Writing firmware... clearing magic for boot from slot 0` step.
+**Conclusion:** Even the flash protocol can't reach the chip. This rules out "missing firmware" — the bootloader should always respond to flash commands. The SPI bus itself may not be electrically connected to the Himax, or the chip is in an unrecoverable state.
 
-Try firmware flash from SD card using `sscma_client_ota_start/write/finish` API. Files needed:
-- `/sdcard/himax/firmware.img` (548KB) — Himax application firmware
-- `/sdcard/himax/person.tflite` (1.6MB) — Person detection model at offset 0x400000
+## Summary of What We Know
 
-The chip's ROM bootloader is alive (sync pin works, SPI responds), so OTA flash should be possible even if application firmware is missing/corrupted.
+1. **SPI2 bus works** — ESP32 can successfully transmit/receive on SPI2 (no driver errors)
+2. **Sync pin goes HIGH** — IO expander pin 6 transitions from 0 to 1 after reset
+3. **No data ever comes back** — `available()` always returns 0 bytes
+4. **AT commands timeout** — `get_info`, `set_model` all timeout after 20s
+5. **Flash commands timeout** — OTA flasher can't communicate with bootloader
+6. **The sync pin going HIGH may be misleading** — could be a pull-up or bootloader behavior, not proof of running application firmware
+7. **All software approaches exhausted** — init order, SSCMA config, DMA fix, task settings
+
+### 12. Python sscma.cli tool (2026-04-16)
+**What:** Installed `python-sscma`, ran `sscma.cli flasher --sn -p /dev/cu.usbmodem5A8A0533623`.
+**Result:** "Timeout waiting for burn mode" — the CLI talks XMODEM over UART, but the USB serial port connects to the ESP32, not the Himax. The Himax UART (GPIO 17/18) is an internal connection, not USB-accessible.
+**Conclusion:** Can't reach Himax from Mac directly. Would need ESP32 firmware to proxy UART.
+
+### 13. Stock firmware test (2026-04-16)
+**What:** Flashed stock SenseCap firmware V1.1.7 (`factory_firmware.bin` at 0x110000 + `ota_data_initial.bin` at 0x10d000).
+**Result:** CAMERA WORKS. Person detection functional with stock firmware.
+**Conclusion:** Himax chip, firmware, model, and SPI2 hardware are all fine. The problem is 100% in our custom firmware's SSCMA/SPI2 initialization or configuration.
+
+## ROOT CAUSE: Confirmed Software Issue
+
+The Himax camera works with stock firmware but not with ours. The chip has valid firmware and model. All 11 software attempts with our firmware failed. The issue is something specific to how our custom firmware initializes or interacts with the SSCMA client / SPI2 bus.
+
+### 14. Removed DMA bounce buffer (2026-04-16)
+**What:** Removed the 33KB pre-allocated DMA bounce buffer and custom LVGL flush callback. Relied on stock approach with CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=16 for smaller LCD DMA chunks. Display works fine without bounce buffer.
+**Result:** Himax still not responding.
+**Conclusion:** The bounce buffer wasn't the issue.
+
+### 15. Himax init before renderer (2026-04-16)
+**What:** Moved `pw_himax_early_init()` before `pw_renderer_init()` so Himax registers on SPI2 before LCD starts SPI3 activity.
+**Result:** Same timeout.
+**Conclusion:** Init order between Himax and renderer doesn't matter.
+
+### 16. Retry get_info 3 times with reset between (2026-04-16)
+**What:** Loop: reset chip → wait 2s → get_info, repeat 3 times.
+**Result:** All 3 attempts timeout.
+**Conclusion:** Multiple resets don't help.
+
+### 17. Skip renderer entirely (2026-04-16)
+**What:** Commented out `pw_renderer_init()` — no LCD, no SPI3, just IO expander + Himax on SPI2.
+**Result:** Boot loop — other code depends on renderer being initialized.
+**Conclusion:** Couldn't isolate SPI2 this way.
+
+### 18. Early explicit bsp_spi_bus_init() (2026-04-16)
+**What:** Called `bsp_spi_bus_init()` explicitly before renderer or Himax, to ensure SPI2 bus is initialized in a clean context.
+**Result:** Same timeout.
+**Conclusion:** SPI bus initialization context doesn't matter.
+
+## Status: BLOCKED
+
+**14 unique approaches tried, none successful.** The camera hardware works (verified with stock firmware V1.1.7). The issue is somewhere in how our custom firmware uses the SSCMA SPI protocol, but we've exhausted all visible configuration differences.
+
+**Matched to stock:**
+- CONFIG_SPI_MASTER_IN_IRAM=y
+- CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=16
+- CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=262144
+- CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
+- CONFIG_LVGL_PORT_TASK_AFFINITY_CPU1=y
+- All SSCMA task settings (10KB stack, CPU1 affinity, external alloc)
+- Identical BSP code (only sensitivity patch)
+- No DMA bounce buffer
+
+**What still differs from stock:**
+- Our firmware has different application code (renderer, web server, etc.)
+- Stock firmware may have a different ESP-IDF version or component versions
+- Stock firmware's build process may produce different compiled output
+
+## Recommended Next Steps
+
+1. **Build the sscma_client_monitor example** — The simplest camera example in the SDK. If it works, diff its compiled sdkconfig against ours.
+2. **Enable ESP-IDF SPI debug logging** — `CONFIG_SPI_MASTER_ENABLE_DEBUG_LOG=y` to see raw SPI transaction details.
+3. **Logic analyzer** — Capture SPI2 bus traffic to see if CS toggles and MISO is driven.
+4. **Try the UART flasher approach** — `sscma_client_flasher_we2_uart.c` bypasses SPI entirely.

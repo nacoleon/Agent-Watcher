@@ -3,6 +3,7 @@ import { POLL_INTERVAL_MS, DEBOUNCE_COUNT } from "./config.js";
 import * as watcher from "./watcher-client.js";
 import { updateCachedStatus } from "./resources.js";
 import { onPoll, onDeviceReboot } from "./queue.js";
+import { log } from "./logger.js";
 
 export function startPresencePoller(server: McpServer): void {
   let lastPresent: boolean | null = null;
@@ -16,6 +17,7 @@ export function startPresencePoller(server: McpServer): void {
 
       // Reboot detection — uptime dropped means device restarted
       if (lastUptime !== null && status.uptime_seconds < lastUptime) {
+        log("reboot", `Watcher rebooted (uptime ${lastUptime}s → ${status.uptime_seconds}s)`);
         await onDeviceReboot();
       }
       lastUptime = status.uptime_seconds;
@@ -35,17 +37,19 @@ export function startPresencePoller(server: McpServer): void {
           lastPresent = status.person_present;
           debounceCounter = 0;
 
+          const event = status.person_present ? "person_arrived" : "person_left";
+          log("presence", event);
           await server.sendLoggingMessage({
             level: "info",
             logger: "presence",
-            data: status.person_present ? "person_arrived" : "person_left",
+            data: event,
           });
         }
       } else {
         debounceCounter = 0;
       }
     } catch (err: any) {
-      // Watcher offline — keep retrying silently
+      log("poll", "Watcher unreachable", { error: err.message });
     }
   }, POLL_INTERVAL_MS);
 }

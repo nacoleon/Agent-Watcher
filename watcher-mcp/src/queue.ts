@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as watcher from "./watcher-client.js";
+import { log } from "./logger.js";
 
 const MAX_QUEUE_SIZE = 10;
 
@@ -54,6 +55,7 @@ export async function onPoll(dismissCount: number): Promise<void> {
   const dismissals = dismissCount - lastDismissCount;
   lastDismissCount = dismissCount;
   currentlyShowing = false;
+  log("queue", `dismiss detected (${dismissals} new, total=${dismissCount}, pending=${queue.length})`);
 
   if (server) {
     await server.sendLoggingMessage({

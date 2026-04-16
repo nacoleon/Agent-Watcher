@@ -147,8 +147,7 @@ void app_main(void)
     pw_renderer_init();
     ESP_LOGI(TAG, "[4/7] Renderer initialized");
 
-    // Init Himax SSCMA client AFTER renderer — renderer allocates DMA bounce buffer
-    // from unfragmented heap. SSCMA registration on SPI2 can fragment DMA memory.
+    // Init Himax SSCMA client after renderer
     pw_himax_early_init();
 
     // [5/7] SD card
@@ -169,7 +168,7 @@ void app_main(void)
     pw_agent_state_set_change_cb(on_state_changed);
 
     // Start tasks
-    pw_himax_task_start();  // Auto-flashes firmware + person model from SD card if Himax not responding
+    // pw_himax_task_start();  // DISABLED: AT commands timeout — see docs/knowledgebase/himax-camera-debugging.md
     pw_agent_state_task_start();
     pw_renderer_task_start();
 

@@ -4,6 +4,9 @@ import { registerTools } from "./tools.js";
 import { registerResources } from "./resources.js";
 import { startPresencePoller } from "./presence.js";
 import { initQueue } from "./queue.js";
+import { initLogger } from "./logger.js";
+
+initLogger();
 
 const server = new McpServer(
   {

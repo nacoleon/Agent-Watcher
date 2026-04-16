@@ -21,23 +21,18 @@
 static const char *TAG = "pw_renderer";
 
 // --- DMA bounce buffer for SPI flush ---
-// Pre-allocated in DMA-capable internal SRAM at boot (before SSCMA fragments the heap).
-// The LVGL draw buffers are in PSRAM which is not DMA-accessible. Without this, the SPI
-// driver allocates a temporary bounce buffer on every flush, which fails when the Himax
-// SSCMA client fragments internal SRAM.
-// Must fit the full LVGL draw buffer: 412 * 40 * 2 = 32960 bytes
-// Allocated at boot before SSCMA fragments the heap (~31KB+ available)
+// DISABLED: Trying stock firmware approach instead (CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=16 +
+// CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=262144 reserves 256KB internal for DMA).
+// Re-enable if fractal lines return without this.
+#if 0
 #define DMA_BOUNCE_SIZE (412 * 40 * sizeof(lv_color_t))
 static uint8_t *s_dma_bounce = NULL;
 
-// Must match the BSP's lvgl_port_display_ctx_t layout (esp_lvgl_port.c)
 typedef struct {
     esp_lcd_panel_io_handle_t io_handle;
     esp_lcd_panel_handle_t panel_handle;
 } renderer_disp_ctx_t;
 
-// Custom flush callback: copies PSRAM data to DMA bounce buffer, single draw_bitmap call.
-// The BSP's on_color_trans_done ISR callback handles lv_disp_flush_ready — we don't call it.
 static void dma_bounce_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map)
 {
     renderer_disp_ctx_t *ctx = (renderer_disp_ctx_t *)drv->user_data;
@@ -49,11 +44,10 @@ static void dma_bounce_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_co
         memcpy(s_dma_bounce, color_map, size);
         esp_lcd_panel_draw_bitmap(ctx->panel_handle, area->x1, area->y1, area->x2 + 1, area->y2 + 1, s_dma_bounce);
     } else {
-        // Fallback: too large for bounce buffer or already DMA-capable
         esp_lcd_panel_draw_bitmap(ctx->panel_handle, area->x1, area->y1, area->x2 + 1, area->y2 + 1, color_map);
     }
-    // Don't call lv_disp_flush_ready here — the BSP's on_color_trans_done ISR handles it
 }
+#endif
 
 static SemaphoreHandle_t s_render_mutex = NULL;
 
@@ -616,26 +610,12 @@ void pw_renderer_init(void)
     // This is called from app_main before pw_renderer_init
 
     // Use BSP to initialize LCD hardware + LVGL display driver
-    // Allocate DMA bounce buffer BEFORE bsp_lvgl_init and SSCMA — heap is unfragmented now
-    s_dma_bounce = heap_caps_malloc(DMA_BOUNCE_SIZE, MALLOC_CAP_DMA);
-    if (s_dma_bounce) {
-        ESP_LOGI(TAG, "DMA bounce buffer allocated: %u bytes at %p", (unsigned)DMA_BOUNCE_SIZE, s_dma_bounce);
-    } else {
-        ESP_LOGW(TAG, "Failed to allocate DMA bounce buffer — SPI flushes may fail");
-    }
-
     lv_disp_t *disp = bsp_lvgl_init();
     if (!disp) {
         ESP_LOGE(TAG, "BSP LVGL init failed");
         return;
     }
     bsp_lcd_brightness_set(80);
-
-    // Override the LVGL flush callback to use our DMA bounce buffer
-    if (s_dma_bounce) {
-        disp->driver->flush_cb = dma_bounce_flush_cb;
-        ESP_LOGI(TAG, "LVGL flush callback overridden with DMA bounce");
-    }
 
     lvgl_port_lock(0);
 
