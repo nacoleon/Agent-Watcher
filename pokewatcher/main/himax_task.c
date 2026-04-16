@@ -2,6 +2,7 @@
 #include "event_queue.h"
 #include "config.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sensecap-watcher.h"
@@ -10,17 +11,19 @@
 
 static const char *TAG = "pw_himax";
 
-#define PERSON_ABSENT_THRESHOLD  5
+#define PERSON_LEFT_TIMEOUT_MS  60000  // 60 seconds before "person left"
 
 static bool s_person_present = false;
-static int s_absent_count = 0;
+static int64_t s_last_person_seen_ms = 0;
 static volatile bool s_himax_paused = false;
 static sscma_client_handle_t s_client = NULL;
 
 static void process_detection(bool person_detected)
 {
+    int64_t now_ms = esp_timer_get_time() / 1000;
+
     if (person_detected) {
-        s_absent_count = 0;
+        s_last_person_seen_ms = now_ms;
         if (!s_person_present) {
             s_person_present = true;
             pw_event_t evt = { .type = PW_EVENT_PERSON_DETECTED };
@@ -28,15 +31,12 @@ static void process_detection(bool person_detected)
             ESP_LOGI(TAG, "Person detected");
         }
     } else {
-        if (s_person_present) {
-            s_absent_count++;
-            if (s_absent_count >= PERSON_ABSENT_THRESHOLD) {
-                s_person_present = false;
-                s_absent_count = 0;
-                pw_event_t evt = { .type = PW_EVENT_PERSON_LEFT };
-                pw_event_send(&evt);
-                ESP_LOGI(TAG, "Person left");
-            }
+        if (s_person_present && s_last_person_seen_ms > 0 &&
+            now_ms - s_last_person_seen_ms >= PERSON_LEFT_TIMEOUT_MS) {
+            s_person_present = false;
+            pw_event_t evt = { .type = PW_EVENT_PERSON_LEFT };
+            pw_event_send(&evt);
+            ESP_LOGI(TAG, "Person left (60s timeout)");
         }
     }
 }
@@ -82,14 +82,47 @@ static void himax_task(void *arg)
         .on_event = on_event,
     };
     sscma_client_register_callback(client, &callback, NULL);
+    ESP_LOGI(TAG, "Callback registered, waiting 3s for Himax boot...");
 
     // Wait for Himax to boot (it outputs noise initially)
     vTaskDelay(pdMS_TO_TICKS(3000));
 
     s_client = client;
+    ESP_LOGI(TAG, "Calling sscma_client_init...");
+
+    // Initialize the SSCMA client (handshake with Himax chip)
+    esp_err_t init_err = sscma_client_init(client);
+    ESP_LOGI(TAG, "sscma_client_init returned: 0x%x (%s)", init_err, esp_err_to_name(init_err));
+
+    // Query device info
+    ESP_LOGI(TAG, "Querying device info...");
+    sscma_client_info_t *info = NULL;
+    esp_err_t info_err = sscma_client_get_info(client, &info, true);
+    ESP_LOGI(TAG, "get_info returned: 0x%x (%s)", info_err, esp_err_to_name(info_err));
+    if (info_err == ESP_OK && info) {
+        ESP_LOGI(TAG, "Himax ID: %s, name: %s, hw_ver: %s, fw_ver: %s",
+                 info->id ? info->id : "null",
+                 info->name ? info->name : "null",
+                 info->hw_ver ? info->hw_ver : "null",
+                 info->fw_ver ? info->fw_ver : "null");
+    }
+
+    // Query model info
+    ESP_LOGI(TAG, "Querying model info...");
+    sscma_client_model_t *model = NULL;
+    esp_err_t model_err = sscma_client_get_model(client, &model, true);
+    ESP_LOGI(TAG, "get_model returned: 0x%x (%s)", model_err, esp_err_to_name(model_err));
+    if (model_err == ESP_OK && model) {
+        ESP_LOGI(TAG, "Model ID: %d, uuid: %s, name: %s",
+                 model->id,
+                 model->uuid ? model->uuid : "null",
+                 model->name ? model->name : "null");
+    }
 
     // Start continuous inference on the Himax chip
-    sscma_client_invoke(client, -1, false, false);
+    ESP_LOGI(TAG, "Starting continuous inference...");
+    esp_err_t invoke_err = sscma_client_invoke(client, -1, false, false);
+    ESP_LOGI(TAG, "sscma_client_invoke returned: 0x%x (%s)", invoke_err, esp_err_to_name(invoke_err));
 
     ESP_LOGI(TAG, "Himax detection running");
 

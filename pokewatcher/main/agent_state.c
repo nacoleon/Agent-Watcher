@@ -1,4 +1,6 @@
 #include "agent_state.h"
+#include "renderer.h"
+#include "dialog.h"
 #include "config.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -10,6 +12,15 @@ static const char *TAG = "pw_agent";
 
 static pw_agent_state_data_t s_state;
 static pw_state_change_cb_t s_change_cb = NULL;
+
+// Presence event log (last 5 events)
+#define PRESENCE_LOG_SIZE 5
+typedef struct {
+    int64_t timestamp_ms;
+    bool arrived;  // true = arrived, false = left
+} presence_log_entry_t;
+static presence_log_entry_t s_presence_log[PRESENCE_LOG_SIZE] = {0};
+static int s_presence_log_count = 0;
 
 static int64_t now_ms(void)
 {
@@ -73,6 +84,26 @@ pw_agent_state_t pw_agent_state_from_string(const char *str)
     return PW_STATE_IDLE;
 }
 
+static void log_presence_event(bool arrived)
+{
+    for (int i = PRESENCE_LOG_SIZE - 1; i > 0; i--) {
+        s_presence_log[i] = s_presence_log[i - 1];
+    }
+    s_presence_log[0].timestamp_ms = now_ms();
+    s_presence_log[0].arrived = arrived;
+    if (s_presence_log_count < PRESENCE_LOG_SIZE) s_presence_log_count++;
+}
+
+int pw_agent_state_get_presence_log(int64_t *timestamps, bool *arrived, int max_entries)
+{
+    int count = s_presence_log_count < max_entries ? s_presence_log_count : max_entries;
+    for (int i = 0; i < count; i++) {
+        timestamps[i] = s_presence_log[i].timestamp_ms;
+        arrived[i] = s_presence_log[i].arrived;
+    }
+    return count;
+}
+
 void pw_agent_state_set_person_present(bool present)
 {
     s_state.person_present = present;
@@ -96,9 +127,20 @@ static void agent_state_task(void *arg)
             switch (event.type) {
                 case PW_EVENT_PERSON_DETECTED:
                     pw_agent_state_set_person_present(true);
+                    log_presence_event(true);
+                    pw_renderer_wake_display();
+                    if (s_state.current_state == PW_STATE_SLEEPING ||
+                        s_state.current_state == PW_STATE_DOWN) {
+                        pw_agent_state_set(PW_STATE_IDLE);
+                    }
                     break;
                 case PW_EVENT_PERSON_LEFT:
                     pw_agent_state_set_person_present(false);
+                    log_presence_event(false);
+                    if (s_state.current_state == PW_STATE_IDLE &&
+                        !pw_dialog_is_visible()) {
+                        pw_agent_state_set(PW_STATE_SLEEPING);
+                    }
                     break;
                 default:
                     break;

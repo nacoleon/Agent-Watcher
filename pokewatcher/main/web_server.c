@@ -126,7 +126,10 @@ static esp_err_t handle_api_agent_state(httpd_req_t *req)
     pw_agent_state_set(state);
     cJSON_Delete(root);
 
-    pw_renderer_wake_display();
+    // Don't wake display for sleep-related states
+    if (state != PW_STATE_SLEEPING && state != PW_STATE_DOWN) {
+        pw_renderer_wake_display();
+    }
 
     cJSON *resp = cJSON_CreateObject();
     cJSON_AddBoolToObject(resp, "ok", true);

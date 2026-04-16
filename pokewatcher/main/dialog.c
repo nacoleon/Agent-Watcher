@@ -11,6 +11,55 @@
 
 static const char *TAG = "pw_dialog";
 
+// Replace common Unicode characters with ASCII equivalents for font compatibility
+static void sanitize_text(char *dst, const char *src, size_t max_len)
+{
+    size_t d = 0;
+    for (size_t i = 0; src[i] && d < max_len - 1; ) {
+        uint8_t c = (uint8_t)src[i];
+        if (c < 0x80) {
+            // Plain ASCII — copy as-is
+            dst[d++] = src[i++];
+        } else if (c == 0xE2 && (uint8_t)src[i+1] == 0x80) {
+            // UTF-8 sequence starting with E2 80 xx
+            uint8_t c3 = (uint8_t)src[i+2];
+            if (c3 == 0x94) {           // U+2014 em dash —
+                if (d + 1 < max_len) dst[d++] = '-';
+                i += 3;
+            } else if (c3 == 0x93) {    // U+2013 en dash –
+                if (d + 1 < max_len) dst[d++] = '-';
+                i += 3;
+            } else if (c3 == 0x98) {    // U+2018 left single quote '
+                if (d + 1 < max_len) dst[d++] = '\'';
+                i += 3;
+            } else if (c3 == 0x99) {    // U+2019 right single quote '
+                if (d + 1 < max_len) dst[d++] = '\'';
+                i += 3;
+            } else if (c3 == 0x9C) {    // U+201C left double quote "
+                if (d + 1 < max_len) dst[d++] = '"';
+                i += 3;
+            } else if (c3 == 0x9D) {    // U+201D right double quote "
+                if (d + 1 < max_len) dst[d++] = '"';
+                i += 3;
+            } else if (c3 == 0xA6) {    // U+2026 horizontal ellipsis …
+                if (d + 2 < max_len) { dst[d++] = '.'; dst[d++] = '.'; }
+                i += 3;
+            } else {
+                i += 3;  // skip unknown E2 80 xx
+            }
+        } else if (c >= 0xF0) {
+            i += 4;  // skip 4-byte UTF-8 (emoji, etc.)
+        } else if (c >= 0xE0) {
+            i += 3;  // skip other 3-byte UTF-8
+        } else if (c >= 0xC0) {
+            i += 2;  // skip 2-byte UTF-8
+        } else {
+            i++;      // skip invalid continuation byte
+        }
+    }
+    dst[d] = '\0';
+}
+
 static lv_obj_t *s_dialog_container = NULL;
 static lv_obj_t *s_dialog_label = NULL;
 static lv_obj_t *s_name_label = NULL;
@@ -25,7 +74,7 @@ static char s_full_text[PW_DIALOG_MAX_TEXT] = "";
 static int s_full_text_len = 0;
 static int s_current_page = 0;
 static int s_total_pages = 0;
-#define CHARS_PER_PAGE  80
+#define CHARS_PER_PAGE  95
 
 // Knob scroll flags (set from ISR callbacks, consumed in tick)
 static volatile bool s_knob_next = false;
@@ -99,15 +148,25 @@ static void show_current_page(void)
     lv_label_set_text(s_dialog_label, &s_full_text[start]);
     s_full_text[start + len] = saved;
 
+    // Add bottom padding when page indicator is visible to prevent text overlap
+    if (s_total_pages > 1) {
+        lv_obj_set_style_pad_bottom(s_dialog_container, 28, 0);
+    } else {
+        lv_obj_set_style_pad_bottom(s_dialog_container, 8, 0);
+    }
+
     update_page_indicator();
 }
 
 void pw_dialog_init(lv_obj_t *parent)
 {
     s_dialog_container = lv_obj_create(parent);
-    // Fixed 288x88 — text paginated at 80 chars, knob scrolls pages
-    lv_obj_set_size(s_dialog_container, 288, 88);
-    lv_obj_align(s_dialog_container, LV_ALIGN_TOP_MID, 0, 74);
+    // Width fixed at 340, height auto-sizes to content (min ~68px for 1 line, max 170px)
+    lv_obj_set_width(s_dialog_container, 340);
+    lv_obj_set_height(s_dialog_container, LV_SIZE_CONTENT);
+    lv_obj_set_style_min_height(s_dialog_container, 68, 0);
+    lv_obj_set_style_max_height(s_dialog_container, 170, 0);
+    lv_obj_align(s_dialog_container, LV_ALIGN_TOP_MID, 0, 100);
     lv_obj_set_style_pad_all(s_dialog_container, 8, 0);
     lv_obj_set_style_radius(s_dialog_container, 8, 0);
 
@@ -121,23 +180,23 @@ void pw_dialog_init(lv_obj_t *parent)
     s_name_label = lv_label_create(s_dialog_container);
     lv_label_set_text(s_name_label, "Zidane:");
     lv_obj_set_style_text_color(s_name_label, lv_color_hex(0x7BE87B), 0);
-    lv_obj_set_style_text_font(s_name_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_name_label, &lv_font_montserrat_22, 0);
     lv_obj_align(s_name_label, LV_ALIGN_TOP_LEFT, 4, 0);
 
     // Message text label
     s_dialog_label = lv_label_create(s_dialog_container);
     lv_label_set_text(s_dialog_label, "");
     lv_obj_set_style_text_color(s_dialog_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(s_dialog_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_width(s_dialog_label, 260);
+    lv_obj_set_style_text_font(s_dialog_label, &lv_font_montserrat_22, 0);
+    lv_obj_set_width(s_dialog_label, 312);
     lv_label_set_long_mode(s_dialog_label, LV_LABEL_LONG_WRAP);
-    lv_obj_align(s_dialog_label, LV_ALIGN_TOP_LEFT, 4, 20);
+    lv_obj_align(s_dialog_label, LV_ALIGN_TOP_LEFT, 4, 26);
 
     // Page indicator: "1/3" bottom-right, small dim text, hidden when single page
     s_page_label = lv_label_create(s_dialog_container);
     lv_label_set_text(s_page_label, "");
     lv_obj_set_style_text_color(s_page_label, lv_color_hex(0x888888), 0);
-    lv_obj_set_style_text_font(s_page_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(s_page_label, &lv_font_montserrat_22, 0);
     lv_obj_align(s_page_label, LV_ALIGN_BOTTOM_RIGHT, -2, -2);
     lv_obj_add_flag(s_page_label, LV_OBJ_FLAG_HIDDEN);
 
@@ -183,11 +242,10 @@ void pw_dialog_show(const char *text, pw_msg_level_t level)
 {
     if (!s_dialog_container) return;
 
-    strncpy(s_full_text, text, PW_DIALOG_MAX_TEXT - 1);
-    s_full_text[PW_DIALOG_MAX_TEXT - 1] = '\0';
+    sanitize_text(s_full_text, text, PW_DIALOG_MAX_TEXT);
     s_full_text_len = strlen(s_full_text);
 
-    strncpy(s_last_text, text, PW_DIALOG_MAX_TEXT - 1);
+    strncpy(s_last_text, s_full_text, PW_DIALOG_MAX_TEXT - 1);
     s_last_text[PW_DIALOG_MAX_TEXT - 1] = '\0';
 
     // Calculate pages
@@ -293,6 +351,11 @@ bool pw_dialog_consume_btn_wake(void)
         return true;
     }
     return false;
+}
+
+void pw_dialog_consume_knob_press(void)
+{
+    s_knob_pressed = false;
 }
 
 const char *pw_dialog_get_last_text(void)

@@ -105,7 +105,10 @@ static void init_sdcard(void)
 static void on_state_changed(pw_agent_state_t old_state, pw_agent_state_t new_state)
 {
     pw_renderer_set_state(new_state);
-    pw_renderer_wake_display();
+    // Don't wake display for sleep-related states
+    if (new_state != PW_STATE_SLEEPING && new_state != PW_STATE_DOWN) {
+        pw_renderer_wake_display();
+    }
     ESP_LOGI(TAG, "State changed: %s -> %s",
              pw_agent_state_to_string(old_state),
              pw_agent_state_to_string(new_state));
@@ -161,7 +164,7 @@ void app_main(void)
     pw_agent_state_set_change_cb(on_state_changed);
 
     // Start tasks
-    // pw_himax_task_start();  // DISABLED: causes SPI collision with LCD (confirmed via diagnostic logs)
+    // pw_himax_task_start();  // DISABLED: Himax chip not responding (get_info timeout). Needs firmware flash via UART.
     pw_agent_state_task_start();
     pw_renderer_task_start();
 

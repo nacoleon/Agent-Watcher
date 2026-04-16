@@ -12,6 +12,7 @@ interface QueuedMessage {
 let queue: QueuedMessage[] = [];
 let currentlyShowing = false;
 let lastDismissCount = -1;
+let lastMessage: QueuedMessage | null = null;
 let server: McpServer | null = null;
 
 export function initQueue(mcpServer: McpServer): void {
@@ -31,6 +32,7 @@ export async function enqueue(
     if (state) await watcher.setState(state);
     await watcher.sendMessage(text, level);
     currentlyShowing = true;
+    lastMessage = { text, level, state };
     return { sent: true, queued: false, pending: queue.length };
   }
 
@@ -67,6 +69,7 @@ export async function onPoll(dismissCount: number): Promise<void> {
       if (next.state) await watcher.setState(next.state);
       await watcher.sendMessage(next.text, next.level);
       currentlyShowing = true;
+      lastMessage = next;
     } catch {
       queue.unshift(next);
     }
@@ -76,6 +79,30 @@ export async function onPoll(dismissCount: number): Promise<void> {
       logger: "messages",
       data: "queue_empty",
     });
+  }
+}
+
+export async function onDeviceReboot(): Promise<void> {
+  lastDismissCount = 0;
+
+  if (server) {
+    await server.sendLoggingMessage({
+      level: "warning",
+      logger: "messages",
+      data: "watcher_rebooted — resending current message",
+    });
+  }
+
+  // Resend the message that was showing when the device died
+  if (currentlyShowing && lastMessage) {
+    try {
+      if (lastMessage.state) await watcher.setState(lastMessage.state);
+      await watcher.sendMessage(lastMessage.text, lastMessage.level);
+    } catch {
+      // Device may still be booting — put it back in queue front
+      queue.unshift(lastMessage);
+      currentlyShowing = false;
+    }
   }
 }
 

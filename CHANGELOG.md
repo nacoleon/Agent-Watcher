@@ -5,9 +5,19 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 ## [Unreleased]
 
 ### Added
-- **RGB LED state blink**: WS2812 LED blinks every 5 seconds with state-specific color — red (alert/down), orange (waiting), pink (greeting), green (reporting). LED turns off on knob dismiss and display sleep.
+- **RGB LED state blink**: WS2812 LED blinks every 10 seconds at 10% brightness with state-specific color — red (alert/down), orange (waiting), pink (greeting), green (reporting). LED turns off on knob dismiss and display sleep.
 - **Background auto-rotate toggle**: Web UI button and API field (`auto_rotate`) to pause/resume the 5-minute background rotation.
 - **OpenClaw heartbeat**: `POST /api/heartbeat` endpoint and `watcher__heartbeat` MCP tool. Watcher switches to "down" state if no heartbeat received for 1.5 hours, auto-recovers to idle on next beat. Web UI shows heartbeat status and last 5 heartbeat timestamps.
+- **Presence logging**: Agent state tracks presence events (arrived/left) with timestamps, exposed in `/api/status` and web UI.
+- **Himax person detection**: Re-enabled SSCMA client task for person detection with 2-poll debounce. Detects person → wakes display + sets idle. Person leaves (60s timeout) → logs departure.
+
+### Changed
+- **Dialog box redesigned**: Larger (340×170 max), auto-heights to content, Montserrat 22 font (was 14), 95 chars per page (was 80). Page indicator gets reserved space at bottom to prevent text overlap.
+- **Unicode text sanitizer**: Em dashes, curly quotes, ellipsis, and emoji in messages are replaced with ASCII equivalents to prevent rectangle glyphs in the font.
+- **Walk speed increased**: Sprite walks at 2.5 px/frame (was 1.5) for more natural RPG-like movement.
+- **Sleep/down states don't wake display**: External state changes to sleeping or down no longer wake the display. Prevents spurious wake after sleep timeout.
+- **Button wake doesn't dismiss dialog**: Pressing the knob while display is off now only wakes the screen. A second press is needed to dismiss the dialog.
+- **Sleeping position with dialog**: When a dialog is open, sleeping/down states position the sprite at bottom-center (visible below dialog) instead of center.
 
 ### Fixed
 - **SPI flush stall / fractal lines (root cause found and fixed)**: Error 0x101 was `ESP_ERR_NO_MEM`, not `ESP_ERR_INVALID_STATE` as previously documented. LVGL draw buffers in PSRAM require DMA bounce buffers in internal SRAM; the default SPI chunk size (32KB) exceeded available contiguous DMA memory (~25-31KB). Fix: `CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=12` reduces chunks to ~28KB, `CONFIG_LVGL_DRAW_BUFF_HEIGHT=40` renders in 40-row strips. Zero visual impact — same image quality, just smaller DMA transfers. Eliminates all display corruption and freeze issues.

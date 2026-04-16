@@ -210,8 +210,8 @@ typedef struct {
 
 // Agent state behavior parameters
 static const mood_behavior_t STATE_BEHAVIORS[] = {
-    [PW_STATE_IDLE]      = { .walk_chance = 60, .turn_chance = 20, .walk_steps_min = 6,  .walk_steps_max = 14, .speed_x10 = 15, .bounce_amp = 0, .pause_min = 20,  .pause_max = 40  },
-    [PW_STATE_WORKING]   = { .walk_chance = 50, .turn_chance = 30, .walk_steps_min = 8,  .walk_steps_max = 16, .speed_x10 = 15, .bounce_amp = 0, .pause_min = 20,  .pause_max = 50  },
+    [PW_STATE_IDLE]      = { .walk_chance = 60, .turn_chance = 20, .walk_steps_min = 6,  .walk_steps_max = 14, .speed_x10 = 25, .bounce_amp = 0, .pause_min = 20,  .pause_max = 40  },
+    [PW_STATE_WORKING]   = { .walk_chance = 50, .turn_chance = 30, .walk_steps_min = 8,  .walk_steps_max = 16, .speed_x10 = 25, .bounce_amp = 0, .pause_min = 20,  .pause_max = 50  },
     [PW_STATE_WAITING]   = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
     [PW_STATE_ALERT]     = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
     [PW_STATE_GREETING]  = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
@@ -722,7 +722,10 @@ void pw_renderer_set_state(pw_agent_state_t state)
 {
     s_pending_state = state;
     s_state_changed = true;
-    s_wake_requested = true;
+    // Don't wake display for sleep-related states
+    if (state != PW_STATE_SLEEPING && state != PW_STATE_DOWN) {
+        s_wake_requested = true;
+    }
     ESP_LOGI(TAG, "State change queued: %s", pw_agent_state_to_string(state));
 }
 
@@ -774,6 +777,7 @@ static void renderer_task(void *arg)
         // --- Check knob button wake (display off + button press = wake) ---
         if (s_display_sleeping && pw_dialog_consume_btn_wake()) {
             s_wake_requested = true;  // feed into the standard wake flow below
+            pw_dialog_consume_knob_press();  // eat the press so it doesn't also dismiss the dialog
             ESP_LOGI(TAG, "Knob button pressed while display off — waking");
         }
 
@@ -783,8 +787,12 @@ static void renderer_task(void *arg)
         bool woke_from_display_off = false;
         if (s_wake_requested) {
             s_wake_requested = false;
-            woke_from_display_off = s_display_sleeping;  // capture before display_wake clears it
+            woke_from_display_off = s_display_sleeping;
             woke_this_frame = true;
+            if (s_display_sleeping) {
+                ESP_LOGI(TAG, "Wake triggered: state_changed=%d msg_pending=%d bg_change=%d",
+                    s_state_changed, s_msg_pending, s_bg_change_requested);
+            }
             display_wake();
 
             // If display was actually off, play wakeup animation before anything else
@@ -871,7 +879,14 @@ static void renderer_task(void *arg)
                 new_target_x10 = s_pos_x10;
                 new_target_y10 = s_pos_y10;
             } else if (new_state == PW_STATE_SLEEPING || new_state == PW_STATE_DOWN || new_state == PW_STATE_WAKEUP) {
-                new_target_y10 = (CENTER_Y + 40) * 10;
+                // If dialog is open, stay at bottom-center (visible below dialog box)
+                bool dialog_open = pw_dialog_is_visible();
+                ESP_LOGI(TAG, "Sleep/down position: dialog_open=%d", dialog_open);
+                if (dialog_open) {
+                    new_target_y10 = (PW_DISPLAY_HEIGHT - SPRITE_HALF - 20) * 10;
+                } else {
+                    new_target_y10 = (CENTER_Y + 40) * 10;
+                }
             } else {
                 new_target_y10 = (PW_DISPLAY_HEIGHT - SPRITE_HALF - 20) * 10;
             }
@@ -1074,17 +1089,17 @@ static void renderer_task(void *arg)
                     pw_dialog_is_visible(), s_msg_pending);
             }
 
-            // RGB LED blink: flash state color for 3 frames every 50 frames (~5s at 10 FPS)
+            // RGB LED blink: flash state color for 3 frames every 100 frames (~10s at 10 FPS)
             {
-                int blink_phase = s_frame_counter % 50;
+                int blink_phase = s_frame_counter % 100;
                 if (blink_phase == 0) {
                     // Turn on: state-specific color
                     switch (s_current_state) {
-                        case PW_STATE_ALERT:     bsp_rgb_set(255, 0, 0);     break;  // red
-                        case PW_STATE_WAITING:   bsp_rgb_set(255, 140, 0);   break;  // orange
-                        case PW_STATE_GREETING:  bsp_rgb_set(255, 50, 100);  break;  // pink
-                        case PW_STATE_REPORTING: bsp_rgb_set(0, 255, 0);     break;  // green
-                        case PW_STATE_DOWN:      bsp_rgb_set(255, 0, 0);     break;  // red
+                        case PW_STATE_ALERT:     bsp_rgb_set(26, 0, 0);      break;  // red (10%)
+                        case PW_STATE_WAITING:   bsp_rgb_set(26, 14, 0);     break;  // orange (10%)
+                        case PW_STATE_GREETING:  bsp_rgb_set(26, 5, 10);     break;  // pink (10%)
+                        case PW_STATE_REPORTING: bsp_rgb_set(0, 26, 0);      break;  // green (10%)
+                        case PW_STATE_DOWN:      bsp_rgb_set(26, 0, 0);      break;  // red (10%)
                         default: break;  // no blink for other states
                     }
                 } else if (blink_phase == 3) {

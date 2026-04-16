@@ -14,6 +14,7 @@ void pw_dialog_tick(void);
 void pw_dialog_next_page(void);
 void pw_dialog_prev_page(void);
 bool pw_dialog_consume_btn_wake(void);
+void pw_dialog_consume_knob_press(void);
 const char *pw_dialog_get_last_text(void);
 
 #endif

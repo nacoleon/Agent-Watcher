@@ -2,16 +2,23 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { POLL_INTERVAL_MS, DEBOUNCE_COUNT } from "./config.js";
 import * as watcher from "./watcher-client.js";
 import { updateCachedStatus } from "./resources.js";
-import { onPoll } from "./queue.js";
+import { onPoll, onDeviceReboot } from "./queue.js";
 
 export function startPresencePoller(server: McpServer): void {
   let lastPresent: boolean | null = null;
+  let lastUptime: number | null = null;
   let debounceCounter = 0;
 
   setInterval(async () => {
     try {
       const status = await watcher.getStatus();
       updateCachedStatus(status);
+
+      // Reboot detection — uptime dropped means device restarted
+      if (lastUptime !== null && status.uptime_seconds < lastUptime) {
+        await onDeviceReboot();
+      }
+      lastUptime = status.uptime_seconds;
 
       // Message queue dismiss detection
       await onPoll(status.dismiss_count);

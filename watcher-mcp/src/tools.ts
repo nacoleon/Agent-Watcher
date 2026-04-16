@@ -18,21 +18,27 @@ export function registerTools(server: McpServer): void {
     {
       title: "Display Message",
       description:
-        "Show a message in the FF9 dialog box on the Watcher display. " +
-        "Max 1000 chars, paginated at 80 chars/page on device. " +
-        "Messages queue if dialog is already showing. " +
-        "You'll receive a 'message_read' notification when dismissed.",
+        "Show a message on the Watcher display and set Zidane's visual state. " +
+        "State controls sprite animation (e.g., alert=combat pose, greeting=wave). " +
+        "Max 1000 chars, paginated at ~95 chars/page. " +
+        "Messages queue if dialog is already showing — state applies when that message reaches the screen. " +
+        "You'll receive a 'message_read' notification when dismissed. " +
+        "Defaults to 'reporting' state if not specified.",
       inputSchema: {
         text: z.string().max(1000).describe("Message text to display"),
+        state: z
+          .enum(VALID_STATES)
+          .default("reporting")
+          .describe("Agent visual state (default: reporting)"),
         level: z
           .enum(["info", "warning", "alert"])
           .default("info")
           .describe("Message urgency level"),
       },
     },
-    async ({ text, level }: { text: string; level: string }) => {
+    async ({ text, state, level }: { text: string; state: string; level: string }) => {
       try {
-        return ok(await enqueue(text, level));
+        return ok(await enqueue(text, level, state));
       } catch (err: any) {
         return error(err.message);
       }
@@ -44,8 +50,8 @@ export function registerTools(server: McpServer): void {
     {
       title: "Set Agent State",
       description:
-        "Change Zidane's visual state on the Watcher display. " +
-        "Controls sprite animation and position.",
+        "Change Zidane's visual state without showing a message. " +
+        "Use for silent state changes like going to sleep or idle.",
       inputSchema: {
         state: z
           .enum(VALID_STATES)
@@ -73,32 +79,6 @@ export function registerTools(server: McpServer): void {
         return ok(await watcher.getStatus());
       } catch (err: any) {
         return error(`Watcher error: ${err.message}`);
-      }
-    }
-  );
-
-  server.registerTool(
-    "notify",
-    {
-      title: "Notify",
-      description:
-        "Convenience: set agent state immediately, then queue a message for display.",
-      inputSchema: {
-        state: z
-          .enum(VALID_STATES)
-          .describe("Agent visual state"),
-        text: z.string().max(1000).describe("Message text to display"),
-        level: z
-          .enum(["info", "warning", "alert"])
-          .default("info")
-          .describe("Message urgency level"),
-      },
-    },
-    async ({ state, text, level }: { state: string; text: string; level: string }) => {
-      try {
-        return ok(await enqueue(text, level, state));
-      } catch (err: any) {
-        return error(err.message);
       }
     }
   );
