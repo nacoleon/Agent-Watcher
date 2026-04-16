@@ -71,6 +71,11 @@
         <div id="hb-log" style="margin-top:6px;color:#5566AA;"></div>
     </div>
 
+    <h2>Presence</h2>
+    <div class="card" style="font-size:12px;">
+        <div id="presence-log" style="color:#5566AA;">No events yet</div>
+    </div>
+
     <button class="reboot" onclick="reboot()">Reboot Watcher</button>
 
     <script>
@@ -164,6 +169,17 @@
                     const ago = Math.floor((uptimeMs - ms) / 60000);
                     return (i === 0 ? '&#9679; ' : '&#9675; ') + ago + 'm ago';
                 }).join('<br>') || 'No heartbeats recorded';
+
+                // Presence log
+                const pLog = d.presence_log || [];
+                const pEl = document.getElementById('presence-log');
+                pEl.innerHTML = pLog.map((e, i) => {
+                    const ago = Math.floor((uptimeMs - e.ms) / 60000);
+                    const icon = e.arrived ? '&#9650;' : '&#9660;';
+                    const color = e.arrived ? '#7BE87B' : '#AA5555';
+                    const label = e.arrived ? 'Arrived' : 'Left';
+                    return '<span style="color:' + color + '">' + icon + ' ' + label + '</span> ' + ago + 'm ago';
+                }).join('<br>') || 'No events yet';
             } catch(e) {}
         }
         function fmt(s) { const h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h>0?h+'h '+m+'m':m+'m'; }

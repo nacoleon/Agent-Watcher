@@ -75,6 +75,18 @@ static esp_err_t handle_api_status(httpd_req_t *req)
         cJSON_AddItemToArray(hb_arr, cJSON_CreateNumber((double)s_heartbeat_log[i]));
     }
 
+    // Presence log
+    int64_t p_timestamps[5];
+    bool p_arrived[5];
+    int p_count = pw_agent_state_get_presence_log(p_timestamps, p_arrived, 5);
+    cJSON *p_arr = cJSON_AddArrayToObject(root, "presence_log");
+    for (int i = 0; i < p_count; i++) {
+        cJSON *entry = cJSON_CreateObject();
+        cJSON_AddNumberToObject(entry, "ms", (double)p_timestamps[i]);
+        cJSON_AddBoolToObject(entry, "arrived", p_arrived[i]);
+        cJSON_AddItemToArray(p_arr, entry);
+    }
+
     wifi_ap_record_t ap_info;
     if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
         cJSON_AddNumberToObject(root, "wifi_rssi", ap_info.rssi);

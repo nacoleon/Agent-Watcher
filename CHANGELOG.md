@@ -9,6 +9,9 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 - **Background auto-rotate toggle**: Web UI button and API field (`auto_rotate`) to pause/resume the 5-minute background rotation.
 - **OpenClaw heartbeat**: `POST /api/heartbeat` endpoint and `watcher__heartbeat` MCP tool. Watcher switches to "down" state if no heartbeat received for 1.5 hours, auto-recovers to idle on next beat. Web UI shows heartbeat status and last 5 heartbeat timestamps.
 
+### Fixed
+- **SPI flush stall / fractal lines (root cause found and fixed)**: Error 0x101 was `ESP_ERR_NO_MEM`, not `ESP_ERR_INVALID_STATE` as previously documented. LVGL draw buffers in PSRAM require DMA bounce buffers in internal SRAM; the default SPI chunk size (32KB) exceeded available contiguous DMA memory (~25-31KB). Fix: `CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=12` reduces chunks to ~28KB, `CONFIG_LVGL_DRAW_BUFF_HEIGHT=40` renders in 40-row strips. Zero visual impact — same image quality, just smaller DMA transfers. Eliminates all display corruption and freeze issues.
+
 ### Previous Unreleased
 
 ### Added

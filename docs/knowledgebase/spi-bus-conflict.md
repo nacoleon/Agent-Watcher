@@ -130,9 +130,10 @@ renderer_task loop:
 
 The "white background" users reported was actually the near-white LVGL default theme color (`0xF7BE` ≈ `#F0F4F0`) that showed before our color was applied, or an empty `lv_img` object covering the bg.
 
-## Background Images (Disabled)
+## DMA Bounce Buffer Issue (RESOLVED 2026-04-15)
 
-Loading 240x170 background tiles from SD card was attempted but is too slow on the 400kHz SPI bus — even individual 80KB files take long enough to trigger the watchdog. The tile files exist on the SD card at `/sdcard/characters/zidane/bg/*.raw` but the loading code is disabled with `#if 0`. Re-enable when:
-- SD card speed can be increased (needs faster card or higher SPI clock)
-- OR backgrounds are pre-cached in PSRAM at boot (before Himax starts)
-- OR a dedicated background loading task with proper SPI arbitration is implemented
+The "SPI flush stall" (error 0x101) was NOT caused by SPI bus conflicts between LCD and Himax. It was `ESP_ERR_NO_MEM` — the SPI driver failed to allocate a DMA bounce buffer in internal SRAM when flushing PSRAM-backed LVGL draw buffers. See `docs/knowledgebase/spi-flush-stall-bug.md` for the full investigation and fix (`CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=12`).
+
+## Background Images
+
+Background tiles (72 files, 240x170 RGB565) are loaded from SD card, scaled to 412x412 in PSRAM, and displayed with strip wipe transitions. Auto-rotation every 5 minutes. Toggle via web UI or `PUT /api/background {"auto_rotate": false}`.

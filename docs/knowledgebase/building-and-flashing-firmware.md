@@ -269,6 +269,11 @@ CONFIG_LV_HOR_RES_MAX=412
 CONFIG_LV_VER_RES_MAX=412
 CONFIG_LV_COLOR_CHROMA_KEY_HEX=0xFF00FF      # Magenta (not used with TRUE_COLOR_ALPHA, but set correctly anyway)
 
+# SPI DMA — chunks must fit in available contiguous DMA-capable internal SRAM (~31KB)
+# Without this, PSRAM-backed LVGL buffers cause ESP_ERR_NO_MEM (0x101) on SPI flush
+CONFIG_LVGL_DRAW_BUFF_HEIGHT=40              # Render in 40-row strips instead of full screen
+CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=12           # SPI chunks ~28KB (fits in ~31KB DMA blocks)
+
 # Input — touch panel DISABLED (aborts on I2C failure)
 CONFIG_LVGL_INPUT_DEVICE_USE_TP=n
 

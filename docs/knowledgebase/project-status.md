@@ -1,6 +1,6 @@
 # Project Status — Zidane Watcher
 
-Last updated: 2026-04-15
+Last updated: 2026-04-16
 
 ## What's Done
 
@@ -24,8 +24,10 @@ Last updated: 2026-04-15
 - Display sleep: 3min idle → sleeping state → 15s later display off. Also sleeps 15s after sleeping state set via API
 - Speaker muted at boot (bsp_codec_mute_set) to prevent idle amp pops
 - Hardware-like reboot from web UI (power cycles LCD/AI chip before restart)
-- API endpoints: GET /api/status, PUT /api/agent-state, POST /api/message, POST /api/reboot, PUT /api/background
-- Web UI at http://10.0.0.40 with state buttons (including "down", "wakeup"), message input, background controls, reboot
+- RGB LED (WS2812): blinks state-specific color every 5s — red (alert/down), orange (waiting), pink (greeting), green (reporting). Off on knob dismiss, display sleep, and non-blinking states.
+- OpenClaw heartbeat: POST /api/heartbeat endpoint, 1.5hr timeout triggers "down" state, auto-recovers to idle on next beat. Web UI shows heartbeat status and last 5 timestamps.
+- API endpoints: GET /api/status, PUT /api/agent-state, POST /api/message, POST /api/reboot, PUT /api/background, POST /api/heartbeat
+- Web UI at http://10.0.0.40 with state buttons (including "down", "wakeup"), message input, background controls, heartbeat log, reboot
 - WiFi auto-connect (YOUR_WIFI_SSID, IP: 10.0.0.40, mDNS: zidane.local)
 - Himax camera disabled (SPI collision with LCD confirmed via diagnostic logs)
 - SPI-safe renderer: prepare/commit split, single LVGL lock per frame (500ms timeout), dirty flags
@@ -47,7 +49,7 @@ Last updated: 2026-04-15
 
 ### MCP Server (watcher-mcp/)
 - Stdio MCP server, spawned by OpenClaw gateway on demand
-- Tools: display_message, set_state, get_status, notify, reboot, get_queue
+- Tools: display_message, set_state, get_status, notify, reboot, get_queue, heartbeat
 - Message queue: FIFO (max 10), states paired with messages, sends next on dismiss
 - Dismiss detection via dismiss_count counter (no polling gap bugs)
 - Presence poller (5s, 2-poll debounce) sends MCP notifications: person_arrived/person_left
@@ -62,11 +64,10 @@ Last updated: 2026-04-15
 
 ## What Needs To Be Done
 
-### SPI Flush Issue (Mitigated)
-- [x] **SPD2010 driver retry** — Retries full CASET+RASET+RAMWR on failure with 10ms delay
-- [x] **LVGL flush deadlock fix** — `lv_disp_flush_ready()` called on error to prevent permanent mutex lock
-- [x] **lvgl_port_lock timeout** — 500ms timeout instead of wait-forever
-- [ ] **Root cause still open** — ESP-IDF SPI driver race condition between polling and queued transactions. See `docs/knowledgebase/spi-flush-stall-bug.md`
+### SPI Flush Issue (RESOLVED)
+- [x] **Root cause found** — Error 0x101 was `ESP_ERR_NO_MEM` (DMA bounce buffer allocation failure), NOT `ESP_ERR_INVALID_STATE`. LVGL draw buffers in PSRAM require DMA bounce buffers in internal SRAM; SPI chunks exceeded available contiguous DMA memory.
+- [x] **Fix applied** — `CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=12` (chunks ~28KB, fits in available ~31KB DMA blocks) + `CONFIG_LVGL_DRAW_BUFF_HEIGHT=40` (render in 40-row strips). See `docs/knowledgebase/spi-flush-stall-bug.md`
+- [x] **lvgl_port_lock timeout** — 500ms timeout (safety net, rarely triggered now)
 
 ### Background Images
 - [x] Pre-load single background at boot — DONE
@@ -91,17 +92,17 @@ Last updated: 2026-04-15
 
 ### MCP Server Improvements
 - [ ] Adaptive polling — faster when messages are queued, slower when idle
-- [ ] Health monitoring — notify Zidane when Watcher goes offline/online
+- [x] Health monitoring — heartbeat tool + 1.5hr timeout auto-down + auto-recover
 
 ### Future Features
 - [ ] Audio/speaker output (codec initialized and muted, ready for use — unmute with `bsp_codec_mute_set(false)`)
-- [ ] RGB LED integration (hardware ready)
+- [x] RGB LED integration — state blinks (alert/down=red, waiting=orange, greeting=pink, reporting=green)
 - [ ] BLE phone connectivity
 - [ ] Touch screen interaction
 
 ## Critical Knowledge for Future Agents
 
-1. **READ `docs/knowledgebase/spi-bus-conflict.md` AND `docs/knowledgebase/display-freeze-root-cause.md`** — Display freeze has TWO causes: (a) per-frame LVGL style changes on large objects, (b) intermittent SPI driver race condition
+1. **READ `docs/knowledgebase/spi-bus-conflict.md` AND `docs/knowledgebase/spi-flush-stall-bug.md`** — Display issues had TWO causes: (a) per-frame LVGL style changes on large objects (fixed), (b) DMA bounce buffer OOM from oversized SPI chunks (fixed with `CONFIG_BSP_LCD_SPI_DMA_SIZE_DIV=12`)
 2. **NEVER call `lv_obj_set_style_*()` every frame on objects > 100x100 pixels** — This overwhelms the SPI flush queue and freezes permanently. Use `lv_img_set_src` and `lv_obj_set_pos` for per-frame updates.
 3. **Build from /tmp** — Space in project path breaks linker. See `docs/knowledgebase/building-and-flashing-firmware.md`
 4. **Move SDK aside during full rebuilds** — `SenseCAP-Watcher-Firmware/` in project root causes linker path issues. Move to `_SDK_BAK` before build, restore after.
@@ -110,4 +111,4 @@ Last updated: 2026-04-15
 7. **Flash with app-flash only** — Preserves NVS and nvsfactory partitions
 8. **Renderer is single-threaded** — All LVGL calls happen in renderer_task. Other threads set volatile flags only.
 9. **Speaker is muted** — Codec initialized at boot, muted with `bsp_codec_mute_set(true)`. Unmute with `bsp_codec_mute_set(false)` when audio needed.
-10. **Himax is disabled** — Commented out in app_main.c. Was causing SPI collision but intermittent SPI issue exists even without it.
+10. **Himax is disabled** — Commented out in app_main.c. SPI collision was a red herring; the real issue was DMA memory exhaustion (now fixed).
