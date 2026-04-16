@@ -3,9 +3,8 @@
 
 #include <stdbool.h>
 
-void pw_himax_early_init(void);  // Call before SD card init
 void pw_himax_task_start(void);
-void pw_himax_pause(void);   // Pause SPI inference — call before LCD-heavy operations
-void pw_himax_resume(void);  // Resume SPI inference
+void pw_himax_pause(void);
+void pw_himax_resume(void);
 
 #endif

@@ -171,9 +171,47 @@ The Himax camera works with stock firmware but not with ours. The chip has valid
 - Stock firmware may have a different ESP-IDF version or component versions
 - Stock firmware's build process may produce different compiled output
 
+### 19. SSCMA debug logging enabled (2026-04-16)
+**What:** Set `CONFIG_SSCMA_ENABLE_DEBUG_LOG=y`, patched `sscma_client_io_spi.c` to log sync pin state and available bytes.
+**Result:** Sync pin reads HIGH via IO expander (correctly). AVAILABLE query sent over SPI. Chip returns `0xFF 0xFF` every time — which the code treats as "0 bytes" (`0xFFFF → len=0`).
+**Conclusion:** SPI bus works, chip is selected (CS toggles), but MISO returns all 1s. The Himax SPI slave hardware is active but no application software is preparing responses.
+
+### 20. Switched to UART transport (2026-04-16)
+**What:** Replaced SPI IO with UART IO (`sscma_client_io_uart.c`). UART1 at 921600 baud on GPIO 17/18. Sends raw AT commands, no binary FEATURE_TRANSPORT protocol.
+**Result:** `get_info` times out after 20s. Chip doesn't respond to AT commands over UART either.
+**Conclusion:** Not SPI-specific. The Himax chip isn't responding to AT commands on ANY transport.
+
+### 21. UART firmware flash attempt (2026-04-16)
+**What:** Used `sscma_client_new_flasher_we2_uart` with XMODEM protocol to flash firmware.img via UART.
+**Result:** "enter ota mode failed" — the chip doesn't respond to the OTA entry command over UART.
+**Conclusion:** The chip won't enter flash mode either. It's completely unresponsive to both AT and OTA protocols on both SPI and UART.
+
+## KEY FINDING: 0xFF on SPI MISO
+
+When querying `FEATURE_TRANSPORT_CMD_AVAILABLE` over SPI:
+- Sync pin is HIGH (IO expander reads correctly)
+- AVAILABLE command packet is sent (256 bytes)
+- 2-byte read returns `0xFF 0xFF` (all ones)
+- Code converts `0xFFFF` to `len=0`
+- This repeats continuously — chip never returns real data
+
+0xFF means the SPI slave peripheral is clocked but no application software is driving MISO with actual data. The chip's ROM/bootloader may be running but the SSCMA application firmware isn't processing transport protocol commands.
+
+## Status: BLOCKED — Chip Unresponsive on All Transports
+
+**21 unique approaches tried.** Camera works with stock firmware V1.1.7.
+The Himax chip doesn't respond to:
+- SPI AT commands (FEATURE_TRANSPORT protocol)
+- SPI OTA flash commands
+- UART AT commands (raw text)
+- UART OTA flash commands (XMODEM protocol)
+
+### 22. Explicit power cycle of Himax AI chip (2026-04-16)
+**What:** Before UART init, explicitly set `BSP_PWR_AI_CHIP` (IO expander pin 11) LOW for 500ms, then HIGH, wait 1s. Full cold power cycle of the Himax chip.
+**Result:** Same timeout. Chip still doesn't respond to AT commands or OTA entry.
+**Conclusion:** Power cycling doesn't help. The chip powers on but its SSCMA application firmware doesn't start the AT command handler.
+
 ## Recommended Next Steps
 
-1. **Build the sscma_client_monitor example** — The simplest camera example in the SDK. If it works, diff its compiled sdkconfig against ours.
-2. **Enable ESP-IDF SPI debug logging** — `CONFIG_SPI_MASTER_ENABLE_DEBUG_LOG=y` to see raw SPI transaction details.
-3. **Logic analyzer** — Capture SPI2 bus traffic to see if CS toggles and MISO is driven.
-4. **Try the UART flasher approach** — `sscma_client_flasher_we2_uart.c` bypasses SPI entirely.
+1. **Build the sscma_client_monitor example** — The simplest camera example in the SDK. Build it, flash it, see if camera works. If yes, diff everything line by line. This is the definitive test.
+2. **Check if stock firmware changed the Himax firmware** — When we tested stock V1.1.7, it may have OTA-updated the Himax to a different firmware version that only responds to the stock firmware's protocol (not the open-source SSCMA AT protocol).
