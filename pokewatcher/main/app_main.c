@@ -169,6 +169,25 @@ void app_main(void)
         ESP_LOGW(TAG, "Failed to load Zidane sprites from SD card");
     }
 
+    // Check for Himax firmware update on SD card — load into PSRAM before unmounting
+    {
+        FILE *fw = fopen("/sdcard/sensecap_watcher_20241106.img", "rb");
+        if (fw) {
+            fseek(fw, 0, SEEK_END);
+            size_t fw_size = ftell(fw);
+            fseek(fw, 0, SEEK_SET);
+            void *fw_buf = heap_caps_malloc(fw_size, MALLOC_CAP_SPIRAM);
+            if (fw_buf && fread(fw_buf, 1, fw_size, fw) == fw_size) {
+                ESP_LOGI(TAG, "Himax firmware loaded from SD: %zu bytes", fw_size);
+                pw_himax_set_firmware(fw_buf, fw_size);
+            } else {
+                ESP_LOGE(TAG, "Failed to read Himax firmware");
+                if (fw_buf) free(fw_buf);
+            }
+            fclose(fw);
+        }
+    }
+
     // [5b/7] SD card done — unmount and power off to free SPI2 MISO for Himax
     // Root cause: SD card in SPI mode doesn't tri-state MISO when CS is high,
     // causing bus contention with Himax camera on the same SPI2 bus.

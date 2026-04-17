@@ -1,3 +1,4 @@
+#include <string.h>
 #include "himax_task.h"
 #include "event_queue.h"
 #include "config.h"
@@ -13,6 +14,10 @@
 static const char *TAG = "pw_himax";
 
 #define PERSON_LEFT_TIMEOUT_MS  60000
+#define OTA_CHUNK_SIZE 256
+
+static void *s_fw_data = NULL;
+static size_t s_fw_size = 0;
 
 static bool s_person_present = false;
 static int64_t s_last_person_seen_ms = 0;
@@ -96,6 +101,51 @@ static void himax_task(void *arg)
     s_client = client;
 
     s_connect_sem = xSemaphoreCreateBinary();
+
+    // Flash firmware if loaded from SD card
+    if (s_fw_data && s_fw_size > 0) {
+        ESP_LOGI(TAG, "=== Flashing Himax firmware (%zu bytes) ===", s_fw_size);
+        sscma_client_flasher_handle_t flasher = bsp_sscma_flasher_init();
+        if (flasher == NULL) {
+            ESP_LOGE(TAG, "Failed to init flasher");
+        } else {
+            sscma_client_init(client);
+            esp_err_t ota_err = sscma_client_ota_start(client, flasher, 0x000000);
+            if (ota_err != ESP_OK) {
+                ESP_LOGE(TAG, "OTA start failed: 0x%x", ota_err);
+            } else {
+                size_t written = 0;
+                bool failed = false;
+                while (written < s_fw_size) {
+                    size_t chunk = s_fw_size - written;
+                    if (chunk > OTA_CHUNK_SIZE) chunk = OTA_CHUNK_SIZE;
+                    // Pad last chunk to 256 bytes
+                    char buf[OTA_CHUNK_SIZE];
+                    memset(buf, 0, OTA_CHUNK_SIZE);
+                    memcpy(buf, (char *)s_fw_data + written, chunk);
+                    if (sscma_client_ota_write(client, buf, OTA_CHUNK_SIZE) != ESP_OK) {
+                        ESP_LOGE(TAG, "OTA write failed at offset %zu", written);
+                        sscma_client_ota_abort(client);
+                        failed = true;
+                        break;
+                    }
+                    written += chunk;
+                    if ((written % (64 * 1024)) == 0 || written >= s_fw_size) {
+                        ESP_LOGI(TAG, "Flash progress: %zu / %zu bytes", written, s_fw_size);
+                    }
+                }
+                if (!failed) {
+                    sscma_client_ota_finish(client);
+                    ESP_LOGI(TAG, "=== Himax firmware flash complete! ===");
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                }
+            }
+        }
+        free(s_fw_data);
+        s_fw_data = NULL;
+        s_fw_size = 0;
+    }
+
     sscma_client_init(client);
 
     // Wait for camera to boot and send connect event
@@ -108,31 +158,19 @@ static void himax_task(void *arg)
     }
     vSemaphoreDelete(s_connect_sem);
     s_connect_sem = NULL;
-    ESP_LOGI(TAG, "Camera ready, sending break to stop auto-inference...");
+    ESP_LOGI(TAG, "Camera ready, configuring...");
 
-    esp_err_t brk = sscma_client_break(client);
-    ESP_LOGI(TAG, "Break result: 0x%x", brk);
-    // Camera's internal buffer has ~2s of binary inference data that drains after break
-    vTaskDelay(pdMS_TO_TICKS(3000));
+    esp_err_t err = sscma_client_set_model(client, 1);
+    ESP_LOGI(TAG, "set_model: 0x%x", err);
 
-    // Start inference with result_only=true (boxes only, no base64 images)
-    // This prevents the massive binary data flood that overwhelms the SPI bus
     s_himax_ready = true;
-    ESP_LOGI(TAG, "Starting inference (result_only mode)...");
-    esp_err_t inv = sscma_client_invoke(client, -1, false, true);
-    if (inv != ESP_OK) {
-        ESP_LOGW(TAG, "invoke failed (0x%x), listening for auto-inference events", inv);
-    }
     ESP_LOGI(TAG, "Person detection running");
 
     while (1) {
         if (s_himax_paused) {
-            sscma_client_break(client);
             while (s_himax_paused) {
-                vTaskDelay(pdMS_TO_TICKS(10));
+                vTaskDelay(pdMS_TO_TICKS(100));
             }
-            sscma_client_invoke(client, -1, false, false);
-            ESP_LOGI(TAG, "Himax resumed");
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -147,6 +185,12 @@ void pw_himax_pause(void)
 void pw_himax_resume(void)
 {
     s_himax_paused = false;
+}
+
+void pw_himax_set_firmware(void *data, size_t size)
+{
+    s_fw_data = data;
+    s_fw_size = size;
 }
 
 void pw_himax_task_start(void)
