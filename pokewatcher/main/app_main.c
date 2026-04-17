@@ -158,43 +158,63 @@ void app_main(void)
     pw_renderer_init();
     ESP_LOGI(TAG, "[4/7] Renderer initialized");
 
-    // [5/7] SD card disabled — SPI2 bus sharing issue
-    ESP_LOGW(TAG, "[5/7] SD card disabled");
+    // [5/7] SD card — load sprites, then power off to free SPI2 for Himax
+    esp_err_t sd_err = bsp_sdcard_init_default();
+    if (sd_err != ESP_OK) {
+        ESP_LOGW(TAG, "SD card init failed: %s — continuing without sprites", esp_err_to_name(sd_err));
+    }
+    ESP_LOGI(TAG, "[5/7] SD card initialized");
 
-    // Init camera from app_main BEFORE starting other tasks
-    // (WiFi/renderer tasks interfere with SPI2 timing)
+    if (!pw_renderer_load_character("zidane")) {
+        ESP_LOGW(TAG, "Failed to load Zidane sprites from SD card");
+    }
+
+    // Check for Himax firmware update on SD card
     {
-        sscma_client_handle_t client = bsp_sscma_client_init();
-        if (client) {
-            const sscma_client_callback_t cb = { .on_event = NULL, .on_log = NULL, .on_connect = NULL };
-            sscma_client_register_callback(client, &cb, NULL);
-            sscma_client_init(client);
-
-            sscma_client_info_t *info = NULL;
-            esp_err_t err = sscma_client_get_info(client, &info, true);
-            ESP_LOGI(TAG, "Himax get_info: 0x%x", err);
-            if (err == ESP_OK && info) {
-                ESP_LOGI(TAG, "Himax: id=%s name=%s fw=%s",
-                         info->id ? info->id : "?",
-                         info->name ? info->name : "?",
-                         info->fw_ver ? info->fw_ver : "?");
+        FILE *fw = fopen("/sdcard/himax_firmware_20240816.img", "rb");
+        if (fw) {
+            fseek(fw, 0, SEEK_END);
+            size_t fw_size = ftell(fw);
+            fseek(fw, 0, SEEK_SET);
+            void *fw_buf = heap_caps_malloc(fw_size, MALLOC_CAP_SPIRAM);
+            if (fw_buf && fread(fw_buf, 1, fw_size, fw) == fw_size) {
+                ESP_LOGI(TAG, "Himax firmware loaded from SD: %zu bytes", fw_size);
+                pw_himax_set_firmware(fw_buf, fw_size);
+            } else {
+                ESP_LOGE(TAG, "Failed to read Himax firmware");
+                if (fw_buf) free(fw_buf);
             }
-            err = sscma_client_set_model(client, 1);
-            ESP_LOGI(TAG, "Himax set_model: 0x%x", err);
-            err = sscma_client_set_sensor(client, 1, 1, true);
-            ESP_LOGI(TAG, "Himax set_sensor: 0x%x", err);
-            vTaskDelay(pdMS_TO_TICKS(50));
-            err = sscma_client_invoke(client, -1, false, true);
-            ESP_LOGI(TAG, "Himax invoke: 0x%x", err);
+            fclose(fw);
         }
     }
 
-    // [7/7] WiFi + web server (started AFTER camera is configured)
+    // [5b/7] Unmount SD and power off to free SPI2 MISO for Himax
+    bsp_sdcard_deinit_default();
+    esp_io_expander_set_dir(bsp_io_expander_init(), BSP_PWR_SDCARD, IO_EXPANDER_OUTPUT);
+    esp_io_expander_set_level(bsp_io_expander_init(), BSP_PWR_SDCARD, 0);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    gpio_config_t sd_cs_conf = {
+        .pin_bit_mask = (1ULL << BSP_SD_SPI_CS),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    gpio_config(&sd_cs_conf);
+    gpio_set_level(BSP_SD_SPI_CS, 1);
+    esp_io_expander_handle_t io_exp = bsp_io_expander_init();
+    esp_io_expander_set_dir(io_exp, BSP_PWR_AI_CHIP, IO_EXPANDER_OUTPUT);
+    esp_io_expander_set_level(io_exp, BSP_PWR_AI_CHIP, 0);
+    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_io_expander_set_level(io_exp, BSP_PWR_AI_CHIP, 1);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    ESP_LOGI(TAG, "[5b/7] SD powered off + Himax power cycled — SPI2 MISO free");
+
+    // [7/7] WiFi + web server
     init_wifi();
     pw_web_server_start();
     ESP_LOGI(TAG, "[7/7] WiFi + web server initialized");
 
     pw_agent_state_set_change_cb(on_state_changed);
+    pw_himax_task_start();
     pw_agent_state_task_start();
     pw_renderer_task_start();
 
