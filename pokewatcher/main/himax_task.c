@@ -32,7 +32,7 @@ static SemaphoreHandle_t s_connect_sem = NULL;
 static const char *GESTURE_NAMES[] = { "Paper", "Rock", "Scissors" };
 
 // Gesture confirmation: need N consecutive detections at threshold+
-#define GESTURE_CONFIRM_COUNT 4
+#define GESTURE_CONFIRM_COUNT 3
 #define GESTURE_THRESHOLD_ROCK 79
 #define GESTURE_THRESHOLD_DEFAULT 80
 #define GESTURE_REDETECT_MS 6000  // same gesture re-logged after 6s
@@ -147,7 +147,14 @@ static void on_event(sscma_client_handle_t client, const sscma_client_reply_t *r
                     s_gesture_streak = 0;
                     // Wake display + purple LED flash
                     pw_renderer_wake_display();
-                    bsp_rgb_set(20, 0, 26);  // purple flash (10% brightness, renderer turns off next cycle)
+                    // Purple double flash
+                    bsp_rgb_set(20, 0, 26);
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    bsp_rgb_set(0, 0, 0);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                    bsp_rgb_set(20, 0, 26);
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    bsp_rgb_set(0, 0, 0);
                 } else if (s_gesture_streak >= GESTURE_CONFIRM_COUNT) {
                     s_gesture_streak = GESTURE_CONFIRM_COUNT;
                 }

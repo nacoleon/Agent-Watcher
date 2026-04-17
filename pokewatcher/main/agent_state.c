@@ -178,6 +178,10 @@ static void agent_state_task(void *arg)
                 case PW_EVENT_GESTURE_DETECTED:
                     log_gesture_event(event.data.gesture.gesture, event.data.gesture.score);
                     ESP_LOGI(TAG, "Gesture: %s (score=%d)", event.data.gesture.gesture, event.data.gesture.score);
+                    if (s_state.current_state == PW_STATE_SLEEPING ||
+                        s_state.current_state == PW_STATE_DOWN) {
+                        pw_agent_state_set(PW_STATE_IDLE);
+                    }
                     break;
                 default:
                     break;
