@@ -87,28 +87,26 @@ Last updated: 2026-04-17
 - [x] Auto-rotate backgrounds every 5 minutes — DONE (72 tiles, random selection)
 - [x] Double-buffered staging for SPI-safe transitions — DONE
 
-### End-to-End Integration
-- [x] **End-to-end MCP test** — Zidane calls watcher__* tools via MCP, Watcher responds (verified 2026-04-15)
-- [ ] Dashboard (8091) should proxy to real Watcher (10.0.0.40) instead of mock data
+### Pending
 
-### Sprite Improvements
-- [ ] Custom Zidane pixel art (currently using FFRK rips from Spriters Resource)
-- [ ] Portrait sprite for dialog box
-- [ ] Fix sleeping animation frames (currently uses front-facing, should use spc1/spc2 at y=200)
+- [ ] **Gesture actions** — Zidane should react when gestures are detected (animation, dialog, state change). The gesture events (`PW_EVENT_GESTURE_DETECTED`) fire in `agent_state.c` but currently only log — no visual reaction on the sprite yet.
+- [ ] **MCP person/gesture notifications** — Wire person arrived/left and gesture events to OpenClaw via the MCP server so Zidane can react conversationally. The MCP server (`watcher-mcp/`) has a presence poller but it's not connected to the firmware's real detection events.
+
+### Completed (no longer needed)
+- [x] Dashboard proxy (8091 → 10.0.0.40) — skipped, not needed
+- [x] Custom pixel art — skipped, FFRK sprites are sufficient
+- [x] Portrait sprite for dialog box — skipped, single character doesn't need it
+- [x] Sleeping animation fix — done
+- [x] Himax camera — FULLY WORKING (root cause: CONFIG_FREERTOS_HZ=100)
+- [x] RGB LED — state blinks + purple double flash on gesture
+- [x] Health monitoring — heartbeat + auto-down/recover
 
 ### Firmware Polish
-- [ ] Remove debug logging from prepare_frame/commit_frame (s_prepare_call_count, s_commit_call_count)
-- [ ] Remove heap monitoring logs (s_heap_log_counter)
+- [ ] Remove debug logging from prepare_frame/commit_frame
 - [ ] Auto-show dialog for alert/greeting/reporting states with default messages
-- [ ] Re-enable Himax camera — BLOCKED by SD card SPI2 bus conflict. Camera works without SD card. 29 attempts documented in `docs/knowledgebase/himax-camera-debugging.md`. Next: progressively add features to monitor example to isolate the conflict.
-
-### MCP Server Improvements
-- [ ] Adaptive polling — faster when messages are queued, slower when idle
-- [x] Health monitoring — heartbeat tool + 1.5hr timeout auto-down + auto-recover
 
 ### Future Features
-- [ ] Audio/speaker output (codec initialized and muted, ready for use — unmute with `bsp_codec_mute_set(false)`)
-- [x] RGB LED integration — state blinks (alert/down=red, waiting=orange, greeting=pink, reporting=green)
+- [ ] Audio/speaker output (codec initialized and muted, ready for use)
 - [ ] BLE phone connectivity
 - [ ] Touch screen interaction
 
