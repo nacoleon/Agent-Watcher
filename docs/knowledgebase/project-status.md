@@ -1,6 +1,6 @@
 # Project Status — Zidane Watcher
 
-Last updated: 2026-04-16
+Last updated: 2026-04-17
 
 ## What's Done
 
@@ -30,7 +30,18 @@ Last updated: 2026-04-16
 - Web UI at http://10.0.0.40 with state buttons (including "down", "wakeup"), message input, background controls, heartbeat log, reboot
 - WiFi auto-connect (YOUR_WIFI_SSID, IP: 10.0.0.40, mDNS: zidane.local)
 - Himax camera SPI2 fix: SD card powered off after sprite loading frees MISO for Himax
-- Himax camera: SSCMA library heap crash SOLVED (4 bugs fixed in sscma_client_ops.c). Camera connects, BREAK/INVOKE work. Person detection events blocked by camera firmware binary data stream (see himax-camera-debugging.md)
+- Himax camera FULLY WORKING: 4 SSCMA library bugs fixed, CONFIG_FREERTOS_HZ=1000 was root cause
+- AI models: Person Detection (model 1), Pet Detection (model 2), Gesture Detection (model 3) — all verified
+- Auto model switching: person detected → gesture mode, 20min idle → back to person mode
+- Gesture detection: Rock/Paper/Scissors with confidence thresholds (85%), 4-frame confirmation, 6s re-detect
+- Rock false-positive filter: requires box width >= 130px (body/face are 64-100px, real fist is 144+)
+- Object presence: any camera detection counts as "arrived", 3min timeout for "left"
+- Purple double LED flash on confirmed gesture, display wakes on gesture
+- Gesture log with box sizes in web UI (20-entry circular buffer)
+- OTA Himax firmware flash from SD card (factory firmware v2024.08.16 restored)
+- 34 background tiles pre-loaded into PSRAM at boot (2.7MB), auto-rotate + manual switch work after SD power-off
+- Web UI: AI Model section with 3-way toggle (Person/Pet/Gesture), expandable logs, background label + prev/next with real tile list
+- API: PUT /api/model for model switching, gesture_log + active_model in GET /api/status
 - SPI-safe renderer: prepare/commit split, single LVGL lock per frame (500ms timeout), dirty flags
 
 ### Dashboard Preview (zidane-dashboard/)
