@@ -158,19 +158,21 @@ static void himax_task(void *arg)
     }
     vSemaphoreDelete(s_connect_sem);
     s_connect_sem = NULL;
+    // Camera connected and ready for commands.
+    // NOTE: invoke/sample trigger raw binary output on this firmware (20241106).
+    // Need original factory firmware (v2024.08.16) for AT-formatted detection events.
+    // For now, just set model and stay idle — system is stable.
     ESP_LOGI(TAG, "Camera ready, configuring...");
 
     esp_err_t err = sscma_client_set_model(client, 1);
     ESP_LOGI(TAG, "set_model: 0x%x", err);
 
     s_himax_ready = true;
-    ESP_LOGI(TAG, "Person detection running");
+    ESP_LOGI(TAG, "Camera connected (detection paused — needs factory firmware for AT events)");
 
     while (1) {
         if (s_himax_paused) {
-            while (s_himax_paused) {
-                vTaskDelay(pdMS_TO_TICKS(100));
-            }
+            while (s_himax_paused) vTaskDelay(pdMS_TO_TICKS(100));
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
