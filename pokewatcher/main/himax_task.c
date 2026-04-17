@@ -65,10 +65,15 @@ static void on_event(sscma_client_handle_t client, const sscma_client_reply_t *r
 
     if (s_active_model == 3) {
         // Gesture model: target 0=paper, 1=rock, 2=scissors
+        // 80%+ = confident gesture, 60-79% = generic object detected
         for (int i = 0; i < num_boxes; i++) {
             if (boxes[i].score > 60 && boxes[i].target < 3) {
                 pw_event_t evt = { .type = PW_EVENT_GESTURE_DETECTED };
-                strncpy(evt.data.gesture.gesture, GESTURE_NAMES[boxes[i].target], 15);
+                if (boxes[i].score >= 80) {
+                    strncpy(evt.data.gesture.gesture, GESTURE_NAMES[boxes[i].target], 15);
+                } else {
+                    strncpy(evt.data.gesture.gesture, "Object", 15);
+                }
                 evt.data.gesture.score = boxes[i].score;
                 pw_event_send(&evt);
             }

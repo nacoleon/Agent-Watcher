@@ -200,7 +200,7 @@
                     const gLog = d.gesture_log || [];
                     aiEl.innerHTML = gLog.map(e => {
                         const ago = Math.floor((uptimeMs - e.ms) / 60000);
-                        const icons = {'Paper':'&#9995;','Rock':'&#9994;','Scissors':'&#9996;'};
+                        const icons = {'Paper':'&#9995;','Rock':'&#9994;','Scissors':'&#9996;','Object':'&#128065;'};
                         const icon = icons[e.gesture] || '&#9679;';
                         return icon + ' <b>' + e.gesture + '</b> (score:' + e.score + ') ' + ago + 'm ago';
                     }).join('<br>') || 'No gestures yet';
