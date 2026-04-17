@@ -33,8 +33,9 @@ static const char *GESTURE_NAMES[] = { "Paper", "Rock", "Scissors" };
 
 // Gesture confirmation: need N consecutive detections at threshold+
 #define GESTURE_CONFIRM_COUNT 4
-#define GESTURE_THRESHOLD_ROCK 82
+#define GESTURE_THRESHOLD_ROCK 85
 #define GESTURE_THRESHOLD_DEFAULT 85
+#define ROCK_MIN_BOX_WIDTH 130  // Filter out body/face false positives (real fist is 144+)
 #define GESTURE_REDETECT_MS 6000  // same gesture re-logged after 6s
 #define GESTURE_IDLE_TIMEOUT_MS (20 * 60 * 1000)  // 20 min no object → back to person
 static int s_gesture_streak = 0;
@@ -43,7 +44,7 @@ static int s_last_confirmed_gesture = -1;
 static int64_t s_last_confirmed_ms = 0;
 static bool s_object_present = false;
 static int64_t s_last_object_seen_ms = 0;
-#define OBJECT_LEFT_TIMEOUT_MS 60000
+#define OBJECT_LEFT_TIMEOUT_MS 180000
 
 static void process_object_presence(bool detected)
 {
@@ -119,18 +120,27 @@ static void on_event(sscma_client_handle_t client, const sscma_client_reply_t *r
         // Find best detection in this frame
         int best_idx = -1;
         for (int i = 0; i < num_boxes; i++) {
-            if (boxes[i].score > 60 && boxes[i].target < 3) {
+            if (boxes[i].target < 3) {
                 if (best_idx < 0 || boxes[i].score > boxes[best_idx].score) {
                     best_idx = i;
                 }
             }
         }
 
+        // Any detection at all counts as object presence
         if (best_idx >= 0) {
+            process_object_presence(true);
+        }
+
+        if (best_idx >= 0 && boxes[best_idx].score > 60) {
             int target = boxes[best_idx].target;
             int threshold = (target == 1) ? GESTURE_THRESHOLD_ROCK : GESTURE_THRESHOLD_DEFAULT;
 
-            if (boxes[best_idx].score >= threshold) {
+            // Rock requires minimum box size to filter body/face false positives
+            if (target == 1 && boxes[best_idx].w < ROCK_MIN_BOX_WIDTH) {
+                s_gesture_streak = 0;
+                s_gesture_streak_target = -1;
+            } else if (boxes[best_idx].score >= threshold) {
                 // High confidence — track streak
                 if (target == s_gesture_streak_target) {
                     s_gesture_streak++;
@@ -146,6 +156,8 @@ static void on_event(sscma_client_handle_t client, const sscma_client_reply_t *r
                     pw_event_t evt = { .type = PW_EVENT_GESTURE_DETECTED };
                     strncpy(evt.data.gesture.gesture, GESTURE_NAMES[target], 15);
                     evt.data.gesture.score = boxes[best_idx].score;
+                    evt.data.gesture.box_w = boxes[best_idx].w;
+                    evt.data.gesture.box_h = boxes[best_idx].h;
                     pw_event_send(&evt);
                     ESP_LOGI(TAG, "Gesture confirmed: %s (score=%d)", GESTURE_NAMES[target], boxes[best_idx].score);
                     s_last_confirmed_gesture = target;
@@ -164,13 +176,15 @@ static void on_event(sscma_client_handle_t client, const sscma_client_reply_t *r
                 } else if (s_gesture_streak >= GESTURE_CONFIRM_COUNT) {
                     s_gesture_streak = GESTURE_CONFIRM_COUNT;
                 }
-                process_object_presence(true);
             } else {
-                // Low confidence — just object presence
+                // Low confidence (60-84%) — just object presence, already handled above
                 s_gesture_streak = 0;
                 s_gesture_streak_target = -1;
-                process_object_presence(true);
             }
+        } else if (best_idx >= 0) {
+            // Below 60% — still counts as object presence (handled above), reset streak
+            s_gesture_streak = 0;
+            s_gesture_streak_target = -1;
         } else {
             // Nothing detected
             s_gesture_streak = 0;

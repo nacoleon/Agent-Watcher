@@ -28,6 +28,8 @@ typedef struct {
     int64_t timestamp_ms;
     char gesture[16];
     uint8_t score;
+    uint16_t box_w;
+    uint16_t box_h;
 } gesture_log_entry_t;
 static gesture_log_entry_t s_gesture_log[GESTURE_LOG_SIZE] = {0};
 static int s_gesture_log_count = 0;
@@ -114,7 +116,7 @@ int pw_agent_state_get_presence_log(int64_t *timestamps, bool *arrived, int max_
     return count;
 }
 
-static void log_gesture_event(const char *gesture, uint8_t score)
+static void log_gesture_event(const char *gesture, uint8_t score, uint16_t box_w, uint16_t box_h)
 {
     for (int i = GESTURE_LOG_SIZE - 1; i > 0; i--) {
         s_gesture_log[i] = s_gesture_log[i - 1];
@@ -123,16 +125,20 @@ static void log_gesture_event(const char *gesture, uint8_t score)
     strncpy(s_gesture_log[0].gesture, gesture, sizeof(s_gesture_log[0].gesture) - 1);
     s_gesture_log[0].gesture[sizeof(s_gesture_log[0].gesture) - 1] = '\0';
     s_gesture_log[0].score = score;
+    s_gesture_log[0].box_w = box_w;
+    s_gesture_log[0].box_h = box_h;
     if (s_gesture_log_count < GESTURE_LOG_SIZE) s_gesture_log_count++;
 }
 
-int pw_agent_state_get_gesture_log(int64_t *timestamps, char gestures[][16], uint8_t *scores, int max_entries)
+int pw_agent_state_get_gesture_log(int64_t *timestamps, char gestures[][16], uint8_t *scores, uint16_t *box_ws, uint16_t *box_hs, int max_entries)
 {
     int count = s_gesture_log_count < max_entries ? s_gesture_log_count : max_entries;
     for (int i = 0; i < count; i++) {
         timestamps[i] = s_gesture_log[i].timestamp_ms;
         strncpy(gestures[i], s_gesture_log[i].gesture, 16);
         scores[i] = s_gesture_log[i].score;
+        box_ws[i] = s_gesture_log[i].box_w;
+        box_hs[i] = s_gesture_log[i].box_h;
     }
     return count;
 }
@@ -176,7 +182,7 @@ static void agent_state_task(void *arg)
                     }
                     break;
                 case PW_EVENT_GESTURE_DETECTED:
-                    log_gesture_event(event.data.gesture.gesture, event.data.gesture.score);
+                    log_gesture_event(event.data.gesture.gesture, event.data.gesture.score, event.data.gesture.box_w, event.data.gesture.box_h);
                     ESP_LOGI(TAG, "Gesture: %s (score=%d)", event.data.gesture.gesture, event.data.gesture.score);
                     if (s_state.current_state == PW_STATE_SLEEPING ||
                         s_state.current_state == PW_STATE_DOWN) {

@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Background Catalog — Zidane Watcher (Testing Only)</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; color: #e0e0e0; font-family: 'Courier New', monospace; padding: 20px; }
+  h1 { color: #f0c040; margin-bottom: 5px; }
+  .subtitle { color: #888; margin-bottom: 20px; display: block; }
+  h2 { color: #80c0ff; margin: 30px 0 15px; border-bottom: 1px solid #333; padding-bottom: 5px; }
+  .back { color: #80c0ff; text-decoration: none; display: inline-block; margin-bottom: 15px; }
+  .back:hover { text-decoration: underline; }
+
+  .stats { display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
+  .stat-box { background: #222244; border-radius: 8px; padding: 12px 18px; }
+  .stat-box .num { font-size: 24px; font-weight: bold; color: #f0c040; }
+  .stat-box .label { font-size: 12px; color: #888; }
+
+  .legend { display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .legend-swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #555; }
+
+  .filter-bar { margin-bottom: 20px; display: flex; gap: 10px; }
+  .filter-bar button { background: #333; color: #ccc; border: 1px solid #555; padding: 6px 14px;
+    border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 13px; }
+  .filter-bar button:hover { background: #444; }
+  .filter-bar button.active { background: #4a4a7a; color: #fff; border-color: #80c0ff; }
+
+  .grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+
+  .bg-card { background: #222244; border-radius: 8px; overflow: hidden; border: 2px solid transparent;
+    transition: border-color 0.2s; position: relative; }
+  .bg-card:hover { border-color: #f0c040; }
+  .bg-card.enabled { border-color: #4CAF50; }
+  .bg-card.disabled { border-color: #AA3333; opacity: 0.5; }
+  .bg-card.disabled:hover { opacity: 0.85; }
+
+  .bg-card canvas { width: 100%; display: block; image-rendering: pixelated; }
+
+  .bg-info { padding: 6px 8px; display: flex; justify-content: space-between; align-items: center; }
+  .bg-number { font-size: 16px; font-weight: bold; color: #f0c040; }
+  .bg-status { font-size: 11px; padding: 2px 6px; border-radius: 3px; font-weight: bold; }
+  .bg-status.on { background: #2d5a2d; color: #6fdc6f; }
+  .bg-status.off { background: #5a2d2d; color: #dc6f6f; }
+
+  .bg-states { padding: 0 8px 6px; font-size: 11px; color: #888; }
+
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+
+<a class="back" href="/">&larr; Back to Dashboard</a>
+<h1>Background Catalog</h1>
+<span class="subtitle">All FFRK backgrounds from the sprite sheet — LOCAL TESTING ONLY</span>
+
+<div class="id-list" style="background:#222244; border-radius:8px; padding:12px 16px; margin-bottom:20px; line-height:1.8; font-size:14px;">
+  <span style="color:#4CAF50; font-weight:bold;">Enabled:</span>
+  <span style="color:#ccc;" id="enabled-list"></span>
+</div>
+
+<div class="id-list" style="background:#222244; border-radius:8px; padding:12px 16px; margin-bottom:20px; line-height:1.8; font-size:14px;">
+  <span style="color:#AA3333; font-weight:bold;">Disabled:</span>
+  <span style="color:#888;" id="disabled-list"></span>
+</div>
+
+<div class="stats">
+  <div class="stat-box"><div class="num" id="total-count">84</div><div class="label">Total</div></div>
+  <div class="stat-box"><div class="num" id="enabled-count">--</div><div class="label">Enabled</div></div>
+  <div class="stat-box"><div class="num" id="disabled-count">--</div><div class="label">Disabled</div></div>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-swatch" style="background:#4CAF50"></div>Enabled</div>
+  <div class="legend-item"><div class="legend-swatch" style="background:#AA3333"></div>Disabled</div>
+</div>
+
+<div class="filter-bar">
+  <button class="active" data-filter="all">All</button>
+  <button data-filter="enabled">Enabled Only</button>
+  <button data-filter="disabled">Disabled Only</button>
+</div>
+
+<div class="grid" id="bg-grid"></div>
+
+<h2>Firmware State Assignments (currently disabled in firmware)</h2>
+<p style="color:#888; margin-bottom:15px;">These were the per-state background pools before SD card loading was disabled. Currently all states use the same shared pool with 5-minute rotation.</p>
+<div id="state-assignments"></div>
+
+<script>
+// Background sheet grid layout (matches index.html)
+const BG_COL_STARTS = [1, 242, 483, 724, 965, 1206];
+const BG_ROW_STARTS = [1, 172, 343, 514, 685, 856, 1027, 1198, 1369, 1540, 1711, 1882, 2053, 2224];
+const BG_CELL_W = 240, BG_CELL_H = 170;
+const TOTAL_BGS = 6 * 14; // 84
+
+// Enabled backgrounds (from dashboard ALL_BGS)
+const ENABLED = new Set([1,2,3,4,5,6,7,8,10,11,12,13,15,16,17,20,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,66,68,69,70,71,72,74,75,76,77,78,79,80,81,83]);
+
+// Firmware state assignments (disabled but documented)
+const STATE_BGS = {
+  'idle':      [2, 5, 10, 11, 15, 27, 42, 50, 70, 71, 75, 25],
+  'working':   [26, 30, 31, 37, 44, 46, 33, 81, 20, 41, 12, 59],
+  'waiting':   [28, 32, 36, 45, 54, 55, 66, 68, 79, 83, 6, 75],
+  'alert':     [8, 13, 38, 39, 48, 53, 56, 58, 60, 61, 76, 29],
+  'greeting':  [1, 6, 17, 29, 40, 49, 51, 52, 64, 72, 74, 50],
+  'sleeping':  [3, 4, 24, 33, 34, 35, 43, 47, 62, 63, 69, 77],
+  'reporting': [7, 12, 16, 20, 41, 57, 59, 78, 80, 10, 46, 83],
+};
+
+function bgPos(idx) {
+  const col = idx % 6, row = Math.floor(idx / 6);
+  return { x: BG_COL_STARTS[col], y: BG_ROW_STARTS[row] };
+}
+
+// Which states use each background
+function getStatesForBg(idx) {
+  const states = [];
+  for (const [state, bgs] of Object.entries(STATE_BGS)) {
+    if (bgs.includes(idx)) states.push(state);
+  }
+  return states;
+}
+
+function toggleBg(card) {
+  const idx = parseInt(card.dataset.idx);
+  if (ENABLED.has(idx)) {
+    ENABLED.delete(idx);
+    card.className = 'bg-card disabled';
+    card.dataset.status = 'disabled';
+    card.querySelector('.bg-status').className = 'bg-status off';
+    card.querySelector('.bg-status').textContent = 'DISABLED';
+  } else {
+    ENABLED.add(idx);
+    card.className = 'bg-card enabled';
+    card.dataset.status = 'enabled';
+    card.querySelector('.bg-status').className = 'bg-status on';
+    card.querySelector('.bg-status').textContent = 'ENABLED';
+  }
+  // Re-apply current filter
+  const activeFilter = document.querySelector('.filter-bar button.active');
+  if (activeFilter) {
+    const filter = activeFilter.dataset.filter;
+    if (filter !== 'all' && filter !== card.dataset.status) {
+      card.classList.add('hidden');
+    }
+  }
+  updateListsAndCounts();
+}
+
+function updateListsAndCounts() {
+  const enabledIds = [];
+  const disabledIds = [];
+  for (let i = 0; i < TOTAL_BGS; i++) {
+    if (ENABLED.has(i)) enabledIds.push(i);
+    else disabledIds.push(i);
+  }
+  document.getElementById('enabled-count').textContent = enabledIds.length;
+  document.getElementById('disabled-count').textContent = disabledIds.length;
+  document.getElementById('enabled-list').textContent = '#' + enabledIds.join(', ');
+  document.getElementById('disabled-list').textContent = '#' + disabledIds.join(', ');
+}
+
+let bgSheetImg = null;
+
+async function init() {
+  bgSheetImg = new Image();
+  bgSheetImg.src = '/backgrounds';
+  await new Promise(r => { bgSheetImg.onload = r; bgSheetImg.onerror = r; });
+
+  const grid = document.getElementById('bg-grid');
+  let enabledCount = 0;
+  let disabledCount = 0;
+
+  for (let i = 0; i < TOTAL_BGS; i++) {
+    const isEnabled = ENABLED.has(i);
+    if (isEnabled) enabledCount++; else disabledCount++;
+
+    const card = document.createElement('div');
+    card.className = 'bg-card ' + (isEnabled ? 'enabled' : 'disabled');
+    card.dataset.status = isEnabled ? 'enabled' : 'disabled';
+    card.dataset.idx = i;
+    card.style.cursor = 'pointer';
+
+    // Click to toggle
+    card.addEventListener('click', () => toggleBg(card));
+
+    // Draw background tile
+    const canvas = document.createElement('canvas');
+    canvas.width = BG_CELL_W;
+    canvas.height = BG_CELL_H;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    const pos = bgPos(i);
+    ctx.drawImage(bgSheetImg, pos.x, pos.y, BG_CELL_W, BG_CELL_H, 0, 0, BG_CELL_W, BG_CELL_H);
+    card.appendChild(canvas);
+
+    // Info bar
+    const info = document.createElement('div');
+    info.className = 'bg-info';
+
+    const num = document.createElement('span');
+    num.className = 'bg-number';
+    num.textContent = '#' + i;
+
+    const status = document.createElement('span');
+    status.className = 'bg-status ' + (isEnabled ? 'on' : 'off');
+    status.textContent = isEnabled ? 'ENABLED' : 'DISABLED';
+
+    info.appendChild(num);
+    info.appendChild(status);
+    card.appendChild(info);
+
+    // State assignments
+    const states = getStatesForBg(i);
+    if (states.length > 0) {
+      const statesDiv = document.createElement('div');
+      statesDiv.className = 'bg-states';
+      statesDiv.textContent = states.join(', ');
+      card.appendChild(statesDiv);
+    }
+
+    grid.appendChild(card);
+  }
+
+  updateListsAndCounts();
+
+  // Filter buttons
+  document.querySelectorAll('.filter-bar button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.filter-bar button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const filter = btn.dataset.filter;
+      document.querySelectorAll('.bg-card').forEach(card => {
+        if (filter === 'all') card.classList.remove('hidden');
+        else if (filter === card.dataset.status) card.classList.remove('hidden');
+        else card.classList.add('hidden');
+      });
+    });
+  });
+
+  // State assignments section
+  buildStateAssignments();
+}
+
+function buildStateAssignments() {
+  const container = document.getElementById('state-assignments');
+
+  for (const [state, bgs] of Object.entries(STATE_BGS)) {
+    const section = document.createElement('div');
+    section.style.marginBottom = '20px';
+
+    const title = document.createElement('h3');
+    title.style.color = '#c0c0c0';
+    title.style.margin = '15px 0 8px';
+    title.textContent = state + ' (' + bgs.length + ' backgrounds)';
+    section.appendChild(title);
+
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.gap = '8px';
+    row.style.flexWrap = 'wrap';
+
+    for (const idx of bgs) {
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#222244;border-radius:6px;overflow:hidden;width:140px;border:1px solid #333;';
+
+      const canvas = document.createElement('canvas');
+      canvas.width = BG_CELL_W;
+      canvas.height = BG_CELL_H;
+      canvas.style.width = '140px';
+      canvas.style.height = '99px';
+      canvas.style.display = 'block';
+      canvas.style.imageRendering = 'pixelated';
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      const pos = bgPos(idx);
+      ctx.drawImage(bgSheetImg, pos.x, pos.y, BG_CELL_W, BG_CELL_H, 0, 0, BG_CELL_W, BG_CELL_H);
+      card.appendChild(canvas);
+
+      const label = document.createElement('div');
+      label.style.cssText = 'padding:4px 6px;font-size:12px;color:#f0c040;font-weight:bold;';
+      label.textContent = '#' + idx;
+      card.appendChild(label);
+
+      row.appendChild(card);
+    }
+
+    section.appendChild(row);
+    container.appendChild(section);
+  }
+}
+
+init();
+</script>
+</body>
+</html>

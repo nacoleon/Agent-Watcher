@@ -47,6 +47,8 @@ typedef struct {
         struct {
             char gesture[16];
             uint8_t score;
+            uint16_t box_w;
+            uint16_t box_h;
         } gesture;
     } data;
 } pw_event_t;

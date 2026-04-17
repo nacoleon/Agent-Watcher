@@ -229,7 +229,8 @@
                         }
                         const icons = {'Paper':'\u{1F590}\uFE0F','Rock':'\u270A\uFE0F','Scissors':'\u270C\uFE0F'};
                         const icon = icons[e.gesture] || '\u{1F440}';
-                        return icon + ' <b>' + e.gesture + '</b> (score:' + e.score + ') ' + ago + 'm ago';
+                        const box = e.bw ? ' [' + e.bw + 'x' + e.bh + ']' : '';
+                        return icon + ' <b>' + e.gesture + '</b> (score:' + e.score + box + ') ' + ago + 'm ago';
                     }).join('<br>') || 'No events yet';
                     aiExpand.style.display = total > 5 ? '' : 'none';
                 } else {

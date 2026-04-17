@@ -21,7 +21,7 @@ const char *pw_agent_state_to_string(pw_agent_state_t state);
 pw_agent_state_t pw_agent_state_from_string(const char *str);
 void pw_agent_state_set_person_present(bool present);
 int pw_agent_state_get_presence_log(int64_t *timestamps, bool *arrived, int max_entries);
-int pw_agent_state_get_gesture_log(int64_t *timestamps, char gestures[][16], uint8_t *scores, int max_entries);
+int pw_agent_state_get_gesture_log(int64_t *timestamps, char gestures[][16], uint8_t *scores, uint16_t *box_ws, uint16_t *box_hs, int max_entries);
 void pw_agent_state_tick(void);
 void pw_agent_state_set_change_cb(pw_state_change_cb_t cb);
 void pw_agent_state_task_start(void);

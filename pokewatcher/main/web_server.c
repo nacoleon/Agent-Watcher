@@ -98,13 +98,16 @@ static esp_err_t handle_api_status(httpd_req_t *req)
     int64_t g_timestamps[20];
     char g_gestures[20][16];
     uint8_t g_scores[20];
-    int g_count = pw_agent_state_get_gesture_log(g_timestamps, g_gestures, g_scores, 20);
+    uint16_t g_box_ws[20], g_box_hs[20];
+    int g_count = pw_agent_state_get_gesture_log(g_timestamps, g_gestures, g_scores, g_box_ws, g_box_hs, 20);
     cJSON *g_arr = cJSON_AddArrayToObject(root, "gesture_log");
     for (int i = 0; i < g_count; i++) {
         cJSON *entry = cJSON_CreateObject();
         cJSON_AddNumberToObject(entry, "ms", (double)g_timestamps[i]);
         cJSON_AddStringToObject(entry, "gesture", g_gestures[i]);
         cJSON_AddNumberToObject(entry, "score", g_scores[i]);
+        cJSON_AddNumberToObject(entry, "bw", g_box_ws[i]);
+        cJSON_AddNumberToObject(entry, "bh", g_box_hs[i]);
         cJSON_AddItemToArray(g_arr, entry);
     }
 
