@@ -23,8 +23,12 @@ static bool s_person_present = false;
 static int64_t s_last_person_seen_ms = 0;
 static volatile bool s_himax_paused = false;
 static volatile bool s_himax_ready = false;
+static volatile int s_pending_model = 0;  // 0 = no switch pending
+static int s_active_model = 1;
 static sscma_client_handle_t s_client = NULL;
 static SemaphoreHandle_t s_connect_sem = NULL;
+
+static const char *GESTURE_NAMES[] = { "Paper", "Rock", "Scissors" };
 
 static void process_detection(bool person_detected)
 {
@@ -50,22 +54,39 @@ static void process_detection(bool person_detected)
 
 static void on_event(sscma_client_handle_t client, const sscma_client_reply_t *reply, void *user_ctx)
 {
-    if (!s_himax_ready) return;  // Ignore stale data before init complete
+    if (!s_himax_ready) return;
     sscma_client_box_t *boxes = NULL;
     int num_boxes = 0;
     esp_err_t err = sscma_utils_fetch_boxes_from_reply(reply, &boxes, &num_boxes);
     if (err != ESP_OK || boxes == NULL || num_boxes == 0) {
-        process_detection(false);
+        if (s_active_model != 3) process_detection(false);
         return;
     }
-    bool found_person = false;
-    for (int i = 0; i < num_boxes; i++) {
-        if (boxes[i].target == 0 && boxes[i].score > 60) {
-            found_person = true;
-            break;
+
+    if (s_active_model == 3) {
+        // Gesture model: target 0=paper, 1=rock, 2=scissors
+        for (int i = 0; i < num_boxes; i++) {
+            if (boxes[i].score > 60 && boxes[i].target < 3) {
+                pw_event_t evt = { .type = PW_EVENT_GESTURE_DETECTED };
+                strncpy(evt.data.gesture.gesture, GESTURE_NAMES[boxes[i].target], 15);
+                evt.data.gesture.score = boxes[i].score;
+                pw_event_send(&evt);
+            }
         }
+    } else {
+        // Person/Pet model: target 0=person (model 1), target 0=cat,1=dog,2=person (model 2)
+        bool found_person = false;
+        for (int i = 0; i < num_boxes; i++) {
+            int t = boxes[i].target;
+            bool is_person = (s_active_model == 1 && t == 0) ||
+                             (s_active_model == 2 && t == 2);
+            if (is_person && boxes[i].score > 60) {
+                found_person = true;
+                break;
+            }
+        }
+        process_detection(found_person);
     }
-    process_detection(found_person);
     free(boxes);
 }
 
@@ -191,6 +212,24 @@ static void himax_task(void *arg)
             sscma_client_invoke(client, -1, false, true);
             ESP_LOGI(TAG, "Himax resumed");
         }
+        // Check for pending model switch
+        int new_model = s_pending_model;
+        if (new_model > 0 && new_model != s_active_model) {
+            ESP_LOGI(TAG, "Switching model %d -> %d", s_active_model, new_model);
+            sscma_client_break(client);
+            err = sscma_client_set_model(client, new_model);
+            ESP_LOGI(TAG, "set_model(%d): 0x%x", new_model, err);
+            if (err == ESP_OK) {
+                s_active_model = new_model;
+                sscma_client_set_sensor(client, 1, 1, true);
+                vTaskDelay(pdMS_TO_TICKS(50));
+                sscma_client_invoke(client, -1, false, true);
+                ESP_LOGI(TAG, "Model %d running", new_model);
+            }
+            s_pending_model = 0;
+        } else if (new_model > 0) {
+            s_pending_model = 0;  // Same model, clear flag
+        }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
@@ -204,6 +243,18 @@ void pw_himax_pause(void)
 void pw_himax_resume(void)
 {
     s_himax_paused = false;
+}
+
+void pw_himax_switch_model(int model_id)
+{
+    if (model_id >= 1 && model_id <= 3) {
+        s_pending_model = model_id;
+    }
+}
+
+int pw_himax_get_model(void)
+{
+    return s_active_model;
 }
 
 void pw_himax_set_firmware(void *data, size_t size)

@@ -8,6 +8,7 @@
 typedef enum {
     PW_EVENT_PERSON_DETECTED,
     PW_EVENT_PERSON_LEFT,
+    PW_EVENT_GESTURE_DETECTED,
     PW_EVENT_AGENT_STATE_CHANGED,
     PW_EVENT_MESSAGE_RECEIVED,
 } pw_event_type_t;
@@ -43,6 +44,10 @@ typedef struct {
             char text[81];
             pw_msg_level_t level;
         } message;
+        struct {
+            char gesture[16];
+            uint8_t score;
+        } gesture;
     } data;
 } pw_event_t;
 

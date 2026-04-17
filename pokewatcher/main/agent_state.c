@@ -22,6 +22,16 @@ typedef struct {
 static presence_log_entry_t s_presence_log[PRESENCE_LOG_SIZE] = {0};
 static int s_presence_log_count = 0;
 
+// Gesture event log (last 5 events)
+#define GESTURE_LOG_SIZE 5
+typedef struct {
+    int64_t timestamp_ms;
+    char gesture[16];
+    uint8_t score;
+} gesture_log_entry_t;
+static gesture_log_entry_t s_gesture_log[GESTURE_LOG_SIZE] = {0};
+static int s_gesture_log_count = 0;
+
 static int64_t now_ms(void)
 {
     return esp_timer_get_time() / 1000;
@@ -104,6 +114,29 @@ int pw_agent_state_get_presence_log(int64_t *timestamps, bool *arrived, int max_
     return count;
 }
 
+static void log_gesture_event(const char *gesture, uint8_t score)
+{
+    for (int i = GESTURE_LOG_SIZE - 1; i > 0; i--) {
+        s_gesture_log[i] = s_gesture_log[i - 1];
+    }
+    s_gesture_log[0].timestamp_ms = now_ms();
+    strncpy(s_gesture_log[0].gesture, gesture, sizeof(s_gesture_log[0].gesture) - 1);
+    s_gesture_log[0].gesture[sizeof(s_gesture_log[0].gesture) - 1] = '\0';
+    s_gesture_log[0].score = score;
+    if (s_gesture_log_count < GESTURE_LOG_SIZE) s_gesture_log_count++;
+}
+
+int pw_agent_state_get_gesture_log(int64_t *timestamps, char gestures[][16], uint8_t *scores, int max_entries)
+{
+    int count = s_gesture_log_count < max_entries ? s_gesture_log_count : max_entries;
+    for (int i = 0; i < count; i++) {
+        timestamps[i] = s_gesture_log[i].timestamp_ms;
+        strncpy(gestures[i], s_gesture_log[i].gesture, 16);
+        scores[i] = s_gesture_log[i].score;
+    }
+    return count;
+}
+
 void pw_agent_state_set_person_present(bool present)
 {
     s_state.person_present = present;
@@ -141,6 +174,10 @@ static void agent_state_task(void *arg)
                         !pw_dialog_is_visible()) {
                         pw_agent_state_set(PW_STATE_SLEEPING);
                     }
+                    break;
+                case PW_EVENT_GESTURE_DETECTED:
+                    log_gesture_event(event.data.gesture.gesture, event.data.gesture.score);
+                    ESP_LOGI(TAG, "Gesture: %s (score=%d)", event.data.gesture.gesture, event.data.gesture.score);
                     break;
                 default:
                     break;

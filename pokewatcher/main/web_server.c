@@ -1,5 +1,6 @@
 #include "web_server.h"
 #include "agent_state.h"
+#include "himax_task.h"
 #include "sensecap-watcher.h"
 #include "dialog.h"
 #include "event_queue.h"
@@ -85,6 +86,26 @@ static esp_err_t handle_api_status(httpd_req_t *req)
         cJSON_AddNumberToObject(entry, "ms", (double)p_timestamps[i]);
         cJSON_AddBoolToObject(entry, "arrived", p_arrived[i]);
         cJSON_AddItemToArray(p_arr, entry);
+    }
+
+    // Active AI model
+    int model = pw_himax_get_model();
+    cJSON_AddNumberToObject(root, "active_model", model);
+    const char *model_names[] = { "?", "Person Detection", "Pet Detection", "Gesture Detection" };
+    cJSON_AddStringToObject(root, "model_name", model >= 1 && model <= 3 ? model_names[model] : "Unknown");
+
+    // Gesture log
+    int64_t g_timestamps[5];
+    char g_gestures[5][16];
+    uint8_t g_scores[5];
+    int g_count = pw_agent_state_get_gesture_log(g_timestamps, g_gestures, g_scores, 5);
+    cJSON *g_arr = cJSON_AddArrayToObject(root, "gesture_log");
+    for (int i = 0; i < g_count; i++) {
+        cJSON *entry = cJSON_CreateObject();
+        cJSON_AddNumberToObject(entry, "ms", (double)g_timestamps[i]);
+        cJSON_AddStringToObject(entry, "gesture", g_gestures[i]);
+        cJSON_AddNumberToObject(entry, "score", g_scores[i]);
+        cJSON_AddItemToArray(g_arr, entry);
     }
 
     wifi_ap_record_t ap_info;
@@ -268,6 +289,51 @@ static esp_err_t handle_api_heartbeat(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t handle_api_model(httpd_req_t *req)
+{
+    char body[64];
+    int ret = recv_full_body(req, body, sizeof(body));
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing body");
+        return ESP_FAIL;
+    }
+
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *model_json = cJSON_GetObjectItem(root, "model");
+    if (!model_json || !cJSON_IsNumber(model_json)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing 'model' field (1-3)");
+        return ESP_FAIL;
+    }
+
+    int model_id = (int)model_json->valuedouble;
+    cJSON_Delete(root);
+
+    if (model_id < 1 || model_id > 3) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Model must be 1-3");
+        return ESP_FAIL;
+    }
+
+    pw_himax_switch_model(model_id);
+
+    const char *model_names[] = { "?", "Person Detection", "Pet Detection", "Gesture Detection" };
+    cJSON *resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "ok", true);
+    cJSON_AddNumberToObject(resp, "model", model_id);
+    cJSON_AddStringToObject(resp, "name", model_names[model_id]);
+    char *json = cJSON_PrintUnformatted(resp);
+    cJSON_Delete(resp);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
+    free(json);
+    return ESP_OK;
+}
+
 static esp_err_t handle_api_reboot(httpd_req_t *req)
 {
     cJSON *resp = cJSON_CreateObject();
@@ -314,6 +380,9 @@ static void register_routes(httpd_handle_t server)
 
     httpd_uri_t heartbeat_uri = { .uri = "/api/heartbeat", .method = HTTP_POST, .handler = handle_api_heartbeat };
     httpd_register_uri_handler(server, &heartbeat_uri);
+
+    httpd_uri_t model_uri = { .uri = "/api/model", .method = HTTP_PUT, .handler = handle_api_model };
+    httpd_register_uri_handler(server, &model_uri);
 }
 
 static void init_mdns(void)
