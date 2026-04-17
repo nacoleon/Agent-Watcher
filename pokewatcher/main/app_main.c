@@ -203,11 +203,7 @@ void app_main(void)
     pw_agent_state_set_change_cb(on_state_changed);
 
     // Start tasks
-    // pw_himax_task_start();  // SPI2 fix works (SD card powered off) but SSCMA library
-    // crashes in heap allocator (tlsf.c:266) when processing stale autorun data from
-    // Himax's previous session. Need to either: (a) flash Himax with no-autorun firmware,
-    // (b) patch SSCMA library's reply parsing to handle unsolicited events safely, or
-    // (c) find a way to drain the RX buffer before SSCMA internal tasks start.
+    pw_himax_task_start();  // SSCMA library buffer accounting bug fixed in sscma_client_ops.c
     pw_agent_state_task_start();
     pw_renderer_task_start();
 
