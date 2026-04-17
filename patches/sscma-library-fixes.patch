@@ -64,7 +64,7 @@ index 66b3c98..ef62d50 100644
  #define CMD_AT_ID         "ID"
  #define CMD_AT_NAME       "NAME"
 diff --git a/components/sscma_client/src/sscma_client_ops.c b/components/sscma_client/src/sscma_client_ops.c
-index cb07fdd..28329fd 100644
+index cb07fdd..337c0f0 100644
 --- a/components/sscma_client/src/sscma_client_ops.c
 +++ b/components/sscma_client/src/sscma_client_ops.c
 @@ -224,9 +224,10 @@ static void sscma_client_process(void *arg)
@@ -123,8 +123,8 @@ index cb07fdd..28329fd 100644
                  }
              }
 +
-+            // If buffer is still nearly full after parsing, smart discard:
-+            // Keep data from the last \r{ prefix to preserve partial replies
++            // Smart discard: if buffer is nearly full with no parseable replies,
++            // keep only data from the last \r{ prefix (potential partial AT reply).
 +            if (client->rx_buffer.pos >= client->rx_buffer.len - 256)
 +            {
 +                char *last_prefix = NULL;
