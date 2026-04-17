@@ -158,28 +158,26 @@ static void himax_task(void *arg)
     }
     vSemaphoreDelete(s_connect_sem);
     s_connect_sem = NULL;
-    // Camera connected. AT commands work (break, get_info, invoke succeed).
-    // But inference output on SPI is padding bytes (0x0a), not AT events.
-    // Need to build/run sscma_client_monitor example to verify if the
-    // reference implementation gets detection events on this hardware.
-    ESP_LOGI(TAG, "Camera ready, configuring...");
+    ESP_LOGI(TAG, "Camera ready, configuring person detection...");
 
     esp_err_t err;
-    err = sscma_client_break(client);
-    ESP_LOGI(TAG, "break: 0x%x", err);
-
     sscma_client_info_t *info = NULL;
-    for (int i = 0; i < 3; i++) {
-        err = sscma_client_get_info(client, &info, true);
-        if (err == ESP_OK) break;
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }
+    err = sscma_client_get_info(client, &info, true);
     if (err == ESP_OK && info) {
         ESP_LOGI(TAG, "Himax: id=%s name=%s fw=%s",
                  info->id ? info->id : "?",
                  info->name ? info->name : "?",
                  info->fw_ver ? info->fw_ver : "?");
+    } else {
+        ESP_LOGW(TAG, "get_info: 0x%x", err);
     }
+
+    err = sscma_client_set_model(client, 1);
+    ESP_LOGI(TAG, "set_model: 0x%x", err);
+
+    err = sscma_client_set_sensor(client, 1, 1, true);
+    ESP_LOGI(TAG, "set_sensor: 0x%x", err);
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     s_himax_ready = true;
     err = sscma_client_invoke(client, -1, false, true);
@@ -191,6 +189,7 @@ static void himax_task(void *arg)
             sscma_client_break(client);
             while (s_himax_paused) vTaskDelay(pdMS_TO_TICKS(100));
             sscma_client_invoke(client, -1, false, true);
+            ESP_LOGI(TAG, "Himax resumed");
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }

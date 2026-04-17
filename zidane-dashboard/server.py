@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Zidane Watcher Dashboard — local preview server.
+"""Zidane Watcher Dashboard — LOCAL TESTING ONLY.
 
-Shows Zidane sprite from FFRK sprite sheet with agent state behaviors
-matching the SenseCap Watcher firmware. Mocks the Watcher API.
+Browser-based preview for testing Zidane sprite animations and agent state
+behaviors. Not used by the Watcher firmware — the firmware loads its own
+assets from the SD card (/sdcard/characters/zidane/).
 
 Usage: python3 zidane-dashboard/server.py
 Then open http://localhost:8091
