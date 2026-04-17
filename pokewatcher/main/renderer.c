@@ -76,11 +76,19 @@ static int64_t s_bg_last_rotate_ms = 0;
 #define BG_ROTATE_INTERVAL_MS  300000    // 5 minutes
 static volatile bool s_bg_auto_rotate = true;
 static int s_bg_tile_list[] = {
-    1,2,3,4,5,6,7,8,10,11,12,13,15,16,17,20,24,25,27,28,29,30,31,32,33,
-    34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,
-    56,57,58,59,60,61,62,63,64,66,68,69,70,71,72,74,75,76,77,78,79,80,81,83
+    2,3,7,8,10,12,13,16,20,24,29,32,33,34,37,38,41,42,43,44,
+    49,53,56,57,60,66,69,71,72,74,76,77,80,83
 };
 #define BG_TILE_COUNT  (sizeof(s_bg_tile_list) / sizeof(s_bg_tile_list[0]))
+
+// Pre-loaded raw tiles in PSRAM (loaded from SD at boot, used after SD power-off)
+typedef struct {
+    int idx;
+    uint16_t w, h;
+    uint16_t *data;  // raw pixel data in PSRAM
+} bg_tile_cache_t;
+static bg_tile_cache_t s_bg_cache[BG_TILE_COUNT] = {0};
+static int s_bg_cache_count = 0;
 
 static pw_sprite_data_t s_sprite = {};
 static pw_agent_state_t s_current_state = PW_STATE_IDLE;
@@ -117,51 +125,64 @@ static const uint8_t STATE_BGS[][BG_PER_STATE] = {
 };
 #endif
 
-// Load a background tile into the staging buffer (for strip wipe transition)
-// Call this OUTSIDE the LVGL lock — it does SD card I/O
+// Pre-load all background tiles from SD card into PSRAM cache
+// Call this at boot while SD card is still mounted
+static void preload_bg_tiles(const char *character_dir)
+{
+    s_bg_cache_count = 0;
+    for (int i = 0; i < BG_TILE_COUNT; i++) {
+        char path[300];
+        snprintf(path, sizeof(path), "%s/zidane/bg/%02d.raw", character_dir, s_bg_tile_list[i]);
+        FILE *f = fopen(path, "rb");
+        if (!f) continue;
+
+        uint16_t dims[2];
+        fread(dims, 2, 2, f);
+        size_t tile_size = dims[0] * dims[1] * 2;
+        uint16_t *data = heap_caps_malloc(tile_size, MALLOC_CAP_SPIRAM);
+        if (!data) { fclose(f); continue; }
+        fread(data, 2, dims[0] * dims[1], f);
+        fclose(f);
+
+        s_bg_cache[s_bg_cache_count].idx = s_bg_tile_list[i];
+        s_bg_cache[s_bg_cache_count].w = dims[0];
+        s_bg_cache[s_bg_cache_count].h = dims[1];
+        s_bg_cache[s_bg_cache_count].data = data;
+        s_bg_cache_count++;
+    }
+    ESP_LOGI(TAG, "Pre-loaded %d background tiles into PSRAM", s_bg_cache_count);
+}
+
+// Find a cached tile by index
+static bg_tile_cache_t *find_cached_tile(int bg_idx)
+{
+    for (int i = 0; i < s_bg_cache_count; i++) {
+        if (s_bg_cache[i].idx == bg_idx) return &s_bg_cache[i];
+    }
+    return NULL;
+}
+
+// Load a background tile into the staging buffer from PSRAM cache
 static bool load_background_tile_to_staging(int bg_idx)
 {
     if (!s_bg_available) return false;
 
-    char path[300];
-    snprintf(path, sizeof(path), "%s/zidane/bg/%02d.raw", PW_SD_CHARACTER_DIR, bg_idx);
-
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        ESP_LOGE(TAG, "Cannot open bg tile: %s", path);
+    bg_tile_cache_t *tile = find_cached_tile(bg_idx);
+    if (!tile || !tile->data) {
+        ESP_LOGE(TAG, "Tile %d not in cache", bg_idx);
         return false;
     }
 
-    uint16_t dims[2];
-    fread(dims, 2, 2, f);
-    uint16_t tw = dims[0], th = dims[1];
-
-    size_t tile_size = tw * th * 2;
-    uint16_t *tile_buf = heap_caps_malloc(tile_size, MALLOC_CAP_SPIRAM);
-    if (!tile_buf) { fclose(f); ESP_LOGE(TAG, "tile alloc failed"); return false; }
-    fread(tile_buf, 2, tw * th, f);
-    fclose(f);
-
+    uint16_t tw = tile->w, th = tile->h;
     size_t dst_size = PW_DISPLAY_WIDTH * PW_DISPLAY_HEIGHT * 2;
 
-    // Allocate live buffer if first load
     if (!s_bg_buf) {
         s_bg_buf = heap_caps_malloc(dst_size, MALLOC_CAP_SPIRAM);
-        if (!s_bg_buf) {
-            heap_caps_free(tile_buf);
-            ESP_LOGE(TAG, "bg display alloc failed");
-            return false;
-        }
+        if (!s_bg_buf) { ESP_LOGE(TAG, "bg display alloc failed"); return false; }
     }
-
-    // Allocate staging buffer for wipe transitions
     if (!s_bg_staging_buf) {
         s_bg_staging_buf = heap_caps_malloc(dst_size, MALLOC_CAP_SPIRAM);
-        if (!s_bg_staging_buf) {
-            heap_caps_free(tile_buf);
-            ESP_LOGE(TAG, "bg staging alloc failed");
-            return false;
-        }
+        if (!s_bg_staging_buf) { ESP_LOGE(TAG, "bg staging alloc failed"); return false; }
     }
 
     // Scale tile to staging buffer via nearest-neighbor
@@ -170,13 +191,11 @@ static bool load_background_tile_to_staging(int bg_idx)
         int sy = dy * th / PW_DISPLAY_HEIGHT;
         for (int dx = 0; dx < PW_DISPLAY_WIDTH; dx++) {
             int sx = dx * tw / PW_DISPLAY_WIDTH;
-            uint16_t px = tile_buf[sy * tw + sx];
+            uint16_t px = tile->data[sy * tw + sx];
             dst[dy * PW_DISPLAY_WIDTH + dx] = (px >> 8) | (px << 8);
         }
     }
-    heap_caps_free(tile_buf);
 
-    // Set up LVGL image descriptor (points to live buffer, not staging)
     s_bg_dsc.header.cf = LV_IMG_CF_TRUE_COLOR;
     s_bg_dsc.header.always_zero = 0;
     s_bg_dsc.header.reserved = 0;
@@ -706,16 +725,17 @@ bool pw_renderer_load_character(const char *character_id)
     s_state_timer = 0;
     // First frame will be rendered by the render loop
 
-    // Check for background tiles directory (try loading tile 01 as a test)
+    // Pre-load all background tiles from SD into PSRAM (before SD is powered off)
     char bg_test[300];
-    snprintf(bg_test, sizeof(bg_test), "%s/%s/bg/01.raw", PW_SD_CHARACTER_DIR, character_id);
+    snprintf(bg_test, sizeof(bg_test), "%s/%s/bg/02.raw", PW_SD_CHARACTER_DIR, character_id);
     FILE *bf = fopen(bg_test, "rb");
     if (bf) {
         fclose(bf);
         s_bg_available = true;
         ESP_LOGI(TAG, "Background tiles found at %s/%s/bg/", PW_SD_CHARACTER_DIR, character_id);
+        preload_bg_tiles(PW_SD_CHARACTER_DIR);
 
-        // Pre-load initial background before Himax starts (no wipe for first load)
+        // Load initial background (no wipe for first load)
         if (load_background_tile_to_staging(16)) {
             size_t dst_size = PW_DISPLAY_WIDTH * PW_DISPLAY_HEIGHT * 2;
             memcpy(s_bg_buf, s_bg_staging_buf, dst_size);
