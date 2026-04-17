@@ -34,9 +34,10 @@ static const char *GESTURE_NAMES[] = { "Paper", "Rock", "Scissors" };
 #define GESTURE_CONFIRM_COUNT 5
 static int s_gesture_streak = 0;
 static int s_gesture_streak_target = -1;  // which target is being streaked
+static int s_last_confirmed_gesture = -1; // only log when gesture changes
 static bool s_object_present = false;
 static int64_t s_last_object_seen_ms = 0;
-#define OBJECT_LEFT_TIMEOUT_MS 10000
+#define OBJECT_LEFT_TIMEOUT_MS 60000
 
 static void process_object_presence(bool detected)
 {
@@ -123,14 +124,17 @@ static void on_event(sscma_client_handle_t client, const sscma_client_reply_t *r
                 s_gesture_streak = 1;
                 s_gesture_streak_target = target;
             }
-            if (s_gesture_streak == GESTURE_CONFIRM_COUNT) {
-                // Confirmed gesture after 5 consecutive detections
+            if (s_gesture_streak == GESTURE_CONFIRM_COUNT && target != s_last_confirmed_gesture) {
+                // Confirmed NEW gesture after 5 consecutive detections
                 pw_event_t evt = { .type = PW_EVENT_GESTURE_DETECTED };
                 strncpy(evt.data.gesture.gesture, GESTURE_NAMES[target], 15);
                 evt.data.gesture.score = boxes[best_idx].score;
                 pw_event_send(&evt);
                 ESP_LOGI(TAG, "Gesture confirmed: %s (score=%d)", GESTURE_NAMES[target], boxes[best_idx].score);
-                s_gesture_streak = 0;  // Reset so it doesn't fire again immediately
+                s_last_confirmed_gesture = target;
+                s_gesture_streak = 0;
+            } else if (s_gesture_streak >= GESTURE_CONFIRM_COUNT) {
+                s_gesture_streak = GESTURE_CONFIRM_COUNT;  // Cap, don't overflow
             }
             process_object_presence(true);  // Also counts as object present
         } else if (best_idx >= 0) {
@@ -139,9 +143,10 @@ static void on_event(sscma_client_handle_t client, const sscma_client_reply_t *r
             s_gesture_streak_target = -1;
             process_object_presence(true);
         } else {
-            // Nothing detected
+            // Nothing detected — reset streak and allow re-detection of same gesture
             s_gesture_streak = 0;
             s_gesture_streak_target = -1;
+            s_last_confirmed_gesture = -1;
             process_object_presence(false);
         }
     } else {
@@ -294,6 +299,7 @@ static void himax_task(void *arg)
                 s_active_model = new_model;
                 s_gesture_streak = 0;
                 s_gesture_streak_target = -1;
+                s_last_confirmed_gesture = -1;
                 s_object_present = false;
                 sscma_client_set_sensor(client, 1, 1, true);
                 vTaskDelay(pdMS_TO_TICKS(50));

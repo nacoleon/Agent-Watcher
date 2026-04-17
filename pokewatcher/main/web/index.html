@@ -213,9 +213,10 @@
                     aiEl.innerHTML = gLog.map(e => {
                         const ago = Math.floor((uptimeMs - e.ms) / 60000);
                         if (e.gesture === 'Arrived' || e.gesture === 'Left') {
-                            const icon = e.gesture === 'Arrived' ? '&#9650;' : '&#9660;';
-                            const color = e.gesture === 'Arrived' ? '#7BE87B' : '#AA5555';
-                            return '<span style="color:' + color + '">' + icon + ' Object ' + e.gesture + '</span> ' + ago + 'm ago';
+                            const icon = e.gesture === 'Arrived' ? '\u{1F7E3}' : '\u26AB';
+                            const label = e.gesture === 'Arrived' ? 'Object Arrived' : 'Object Left';
+                            const color = e.gesture === 'Arrived' ? '#CE93D8' : '#636e72';
+                            return icon + ' <span style="color:' + color + '">' + label + '</span> ' + ago + 'm ago';
                         }
                         const icons = {'Paper':'\u{1F590}\uFE0F','Rock':'\u270A\uFE0F','Scissors':'\u270C\uFE0F'};
                         const icon = icons[e.gesture] || '\u{1F440}';
