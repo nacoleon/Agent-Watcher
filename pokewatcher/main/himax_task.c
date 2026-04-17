@@ -33,9 +33,10 @@ static const char *GESTURE_NAMES[] = { "Paper", "Rock", "Scissors" };
 
 // Gesture confirmation: need N consecutive detections at threshold+
 #define GESTURE_CONFIRM_COUNT 3
-#define GESTURE_THRESHOLD_ROCK 79
+#define GESTURE_THRESHOLD_ROCK 82
 #define GESTURE_THRESHOLD_DEFAULT 80
 #define GESTURE_REDETECT_MS 6000  // same gesture re-logged after 6s
+#define GESTURE_IDLE_TIMEOUT_MS (20 * 60 * 1000)  // 20 min no object → back to person
 static int s_gesture_streak = 0;
 static int s_gesture_streak_target = -1;
 static int s_last_confirmed_gesture = -1;
@@ -80,6 +81,11 @@ static void process_detection(bool person_detected)
             pw_event_t evt = { .type = PW_EVENT_PERSON_DETECTED };
             pw_event_send(&evt);
             ESP_LOGI(TAG, "Person detected");
+            // Auto-switch to gesture mode when person arrives
+            if (s_active_model == 1) {
+                ESP_LOGI(TAG, "Person arrived → switching to Gesture mode");
+                s_pending_model = 3;
+            }
         }
     } else {
         if (s_person_present && s_last_person_seen_ms > 0 &&
@@ -333,6 +339,14 @@ static void himax_task(void *arg)
             s_pending_model = 0;
         } else if (new_model > 0) {
             s_pending_model = 0;  // Same model, clear flag
+        }
+        // Auto-switch back to person mode if gesture mode idle for 20 min
+        if (s_active_model == 3 && !s_object_present) {
+            int64_t now = esp_timer_get_time() / 1000;
+            if (s_last_object_seen_ms > 0 && now - s_last_object_seen_ms >= GESTURE_IDLE_TIMEOUT_MS) {
+                ESP_LOGI(TAG, "Gesture mode idle 20min → switching to Person");
+                s_pending_model = 1;
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
