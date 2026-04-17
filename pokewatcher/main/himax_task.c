@@ -10,6 +10,7 @@
 #include "sensecap-watcher.h"
 #include "sscma_client_ops.h"
 #include "sscma_client_types.h"
+#include "renderer.h"
 
 static const char *TAG = "pw_himax";
 
@@ -30,11 +31,15 @@ static SemaphoreHandle_t s_connect_sem = NULL;
 
 static const char *GESTURE_NAMES[] = { "Paper", "Rock", "Scissors" };
 
-// Gesture confirmation: need 5 consecutive detections of same gesture at 80%+
-#define GESTURE_CONFIRM_COUNT 5
+// Gesture confirmation: need N consecutive detections at threshold+
+#define GESTURE_CONFIRM_COUNT 4
+#define GESTURE_THRESHOLD_ROCK 79
+#define GESTURE_THRESHOLD_DEFAULT 80
+#define GESTURE_REDETECT_MS 6000  // same gesture re-logged after 6s
 static int s_gesture_streak = 0;
-static int s_gesture_streak_target = -1;  // which target is being streaked
-static int s_last_confirmed_gesture = -1; // only log when gesture changes
+static int s_gesture_streak_target = -1;
+static int s_last_confirmed_gesture = -1;
+static int64_t s_last_confirmed_ms = 0;
 static bool s_object_present = false;
 static int64_t s_last_object_seen_ms = 0;
 #define OBJECT_LEFT_TIMEOUT_MS 60000
@@ -115,35 +120,46 @@ static void on_event(sscma_client_handle_t client, const sscma_client_reply_t *r
             }
         }
 
-        if (best_idx >= 0 && boxes[best_idx].score >= 80) {
-            // High confidence gesture — track streak
+        if (best_idx >= 0) {
             int target = boxes[best_idx].target;
-            if (target == s_gesture_streak_target) {
-                s_gesture_streak++;
+            int threshold = (target == 1) ? GESTURE_THRESHOLD_ROCK : GESTURE_THRESHOLD_DEFAULT;
+
+            if (boxes[best_idx].score >= threshold) {
+                // High confidence — track streak
+                if (target == s_gesture_streak_target) {
+                    s_gesture_streak++;
+                } else {
+                    s_gesture_streak = 1;
+                    s_gesture_streak_target = target;
+                }
+                int64_t now = esp_timer_get_time() / 1000;
+                bool is_new = (target != s_last_confirmed_gesture);
+                bool is_redetect = (target == s_last_confirmed_gesture &&
+                                    now - s_last_confirmed_ms >= GESTURE_REDETECT_MS);
+                if (s_gesture_streak >= GESTURE_CONFIRM_COUNT && (is_new || is_redetect)) {
+                    pw_event_t evt = { .type = PW_EVENT_GESTURE_DETECTED };
+                    strncpy(evt.data.gesture.gesture, GESTURE_NAMES[target], 15);
+                    evt.data.gesture.score = boxes[best_idx].score;
+                    pw_event_send(&evt);
+                    ESP_LOGI(TAG, "Gesture confirmed: %s (score=%d)", GESTURE_NAMES[target], boxes[best_idx].score);
+                    s_last_confirmed_gesture = target;
+                    s_last_confirmed_ms = now;
+                    s_gesture_streak = 0;
+                    // Wake display + purple LED flash
+                    pw_renderer_wake_display();
+                    bsp_rgb_set(20, 0, 26);  // purple flash (10% brightness, renderer turns off next cycle)
+                } else if (s_gesture_streak >= GESTURE_CONFIRM_COUNT) {
+                    s_gesture_streak = GESTURE_CONFIRM_COUNT;
+                }
+                process_object_presence(true);
             } else {
-                s_gesture_streak = 1;
-                s_gesture_streak_target = target;
-            }
-            if (s_gesture_streak == GESTURE_CONFIRM_COUNT && target != s_last_confirmed_gesture) {
-                // Confirmed NEW gesture after 5 consecutive detections
-                pw_event_t evt = { .type = PW_EVENT_GESTURE_DETECTED };
-                strncpy(evt.data.gesture.gesture, GESTURE_NAMES[target], 15);
-                evt.data.gesture.score = boxes[best_idx].score;
-                pw_event_send(&evt);
-                ESP_LOGI(TAG, "Gesture confirmed: %s (score=%d)", GESTURE_NAMES[target], boxes[best_idx].score);
-                s_last_confirmed_gesture = target;
+                // Low confidence — just object presence
                 s_gesture_streak = 0;
-            } else if (s_gesture_streak >= GESTURE_CONFIRM_COUNT) {
-                s_gesture_streak = GESTURE_CONFIRM_COUNT;  // Cap, don't overflow
+                s_gesture_streak_target = -1;
+                process_object_presence(true);
             }
-            process_object_presence(true);  // Also counts as object present
-        } else if (best_idx >= 0) {
-            // Low confidence (60-79%) — just object presence
-            s_gesture_streak = 0;
-            s_gesture_streak_target = -1;
-            process_object_presence(true);
         } else {
-            // Nothing detected — reset streak and allow re-detection of same gesture
+            // Nothing detected
             s_gesture_streak = 0;
             s_gesture_streak_target = -1;
             s_last_confirmed_gesture = -1;
@@ -300,6 +316,7 @@ static void himax_task(void *arg)
                 s_gesture_streak = 0;
                 s_gesture_streak_target = -1;
                 s_last_confirmed_gesture = -1;
+                s_last_confirmed_ms = 0;
                 s_object_present = false;
                 sscma_client_set_sensor(client, 1, 1, true);
                 vTaskDelay(pdMS_TO_TICKS(50));
