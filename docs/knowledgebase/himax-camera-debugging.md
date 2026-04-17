@@ -2,14 +2,20 @@
 
 Documents all attempts to get the Himax WE2 AI camera working with our custom pokewatcher firmware.
 
-## Final Root Cause
+## Current Status (2026-04-16)
 
-**SD card on SPI2 breaks Himax communication — but only in our firmware.**
+**SSCMA library heap crash: SOLVED.** Camera connects, BREAK and INVOKE work. No crashes for 5+ minutes.
 
-- Camera works: stock firmware, sscma_client_monitor example, our firmware WITHOUT SD card
-- Camera fails: our firmware WITH SD card (any init order, any clock speed, any sdkconfig)
-- The monitor example runs SD card + Himax on SPI2 simultaneously with no issues
-- Something unique to our application code's runtime behavior prevents SPI2 bus sharing
+**Person detection events: BLOCKED by camera firmware binary data stream.** The Himax auto-run firmware outputs raw binary data (not AT-formatted) alongside AT events, overwhelming the 96KB RX buffer. AT command responses occasionally get through between binary flood cycles, but inference events (bounding boxes) are lost. See himax-agent-report.md for full investigation and the 4 bugs fixed in sscma_client_ops.c.
+
+**Next steps to get person detection working:**
+1. Flash Himax with AT-only firmware (no raw binary output) — BEST OPTION
+2. Or: modify SPI transport layer to filter binary data at read time
+3. Or: increase RX buffer dramatically and improve process task to extract AT events from binary stream
+
+## Previous Root Cause (SD Card MISO — SOLVED)
+
+**SD card on SPI2 holds MISO after init — fixed by powering off SD card after sprite load.**
 
 ## Himax Hardware Details
 

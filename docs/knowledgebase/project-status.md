@@ -30,7 +30,7 @@ Last updated: 2026-04-16
 - Web UI at http://10.0.0.40 with state buttons (including "down", "wakeup"), message input, background controls, heartbeat log, reboot
 - WiFi auto-connect (YOUR_WIFI_SSID, IP: 10.0.0.40, mDNS: zidane.local)
 - Himax camera SPI2 fix: SD card powered off after sprite loading frees MISO for Himax
-- Himax camera blocked by SSCMA library heap crash (stale autorun data — see himax-camera-debugging.md)
+- Himax camera: SSCMA library heap crash SOLVED (4 bugs fixed in sscma_client_ops.c). Camera connects, BREAK/INVOKE work. Person detection events blocked by camera firmware binary data stream (see himax-camera-debugging.md)
 - SPI-safe renderer: prepare/commit split, single LVGL lock per frame (500ms timeout), dirty flags
 
 ### Dashboard Preview (zidane-dashboard/)
