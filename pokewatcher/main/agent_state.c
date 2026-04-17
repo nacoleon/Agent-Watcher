@@ -14,7 +14,7 @@ static pw_agent_state_data_t s_state;
 static pw_state_change_cb_t s_change_cb = NULL;
 
 // Presence event log (last 5 events)
-#define PRESENCE_LOG_SIZE 5
+#define PRESENCE_LOG_SIZE 20
 typedef struct {
     int64_t timestamp_ms;
     bool arrived;  // true = arrived, false = left
@@ -23,7 +23,7 @@ static presence_log_entry_t s_presence_log[PRESENCE_LOG_SIZE] = {0};
 static int s_presence_log_count = 0;
 
 // Gesture event log (last 5 events)
-#define GESTURE_LOG_SIZE 5
+#define GESTURE_LOG_SIZE 20
 typedef struct {
     int64_t timestamp_ms;
     char gesture[16];

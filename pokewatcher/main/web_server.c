@@ -77,9 +77,9 @@ static esp_err_t handle_api_status(httpd_req_t *req)
     }
 
     // Presence log
-    int64_t p_timestamps[5];
-    bool p_arrived[5];
-    int p_count = pw_agent_state_get_presence_log(p_timestamps, p_arrived, 5);
+    int64_t p_timestamps[20];
+    bool p_arrived[20];
+    int p_count = pw_agent_state_get_presence_log(p_timestamps, p_arrived, 20);
     cJSON *p_arr = cJSON_AddArrayToObject(root, "presence_log");
     for (int i = 0; i < p_count; i++) {
         cJSON *entry = cJSON_CreateObject();
@@ -95,10 +95,10 @@ static esp_err_t handle_api_status(httpd_req_t *req)
     cJSON_AddStringToObject(root, "model_name", model >= 1 && model <= 3 ? model_names[model] : "Unknown");
 
     // Gesture log
-    int64_t g_timestamps[5];
-    char g_gestures[5][16];
-    uint8_t g_scores[5];
-    int g_count = pw_agent_state_get_gesture_log(g_timestamps, g_gestures, g_scores, 5);
+    int64_t g_timestamps[20];
+    char g_gestures[20][16];
+    uint8_t g_scores[20];
+    int g_count = pw_agent_state_get_gesture_log(g_timestamps, g_gestures, g_scores, 20);
     cJSON *g_arr = cJSON_AddArrayToObject(root, "gesture_log");
     for (int i = 0; i < g_count; i++) {
         cJSON *entry = cJSON_CreateObject();
