@@ -64,7 +64,7 @@ index 66b3c98..ef62d50 100644
  #define CMD_AT_ID         "ID"
  #define CMD_AT_NAME       "NAME"
 diff --git a/components/sscma_client/src/sscma_client_ops.c b/components/sscma_client/src/sscma_client_ops.c
-index cb07fdd..337c0f0 100644
+index cb07fdd..c7b457b 100644
 --- a/components/sscma_client/src/sscma_client_ops.c
 +++ b/components/sscma_client/src/sscma_client_ops.c
 @@ -224,9 +224,10 @@ static void sscma_client_process(void *arg)
@@ -106,7 +106,7 @@ index cb07fdd..337c0f0 100644
  
                          reply.data[len] = 0;
                          reply.payload = cJSON_Parse(reply.data);
-@@ -421,13 +425,42 @@ static void sscma_client_process(void *arg)
+@@ -421,13 +425,59 @@ static void sscma_client_process(void *arg)
                  }
                  else
                  {
@@ -145,7 +145,24 @@ index cb07fdd..337c0f0 100644
 +                }
 +                else
 +                {
-+                    ESP_LOGW(TAG, "rx buffer full, no prefix found, discarding %d bytes", client->rx_buffer.pos);
++                    ESP_LOGW(TAG, "rx buffer full, no prefix found, discarding %d bytes. First 32: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
++                        client->rx_buffer.pos,
++                        (uint8_t)client->rx_buffer.data[0], (uint8_t)client->rx_buffer.data[1],
++                        (uint8_t)client->rx_buffer.data[2], (uint8_t)client->rx_buffer.data[3],
++                        (uint8_t)client->rx_buffer.data[4], (uint8_t)client->rx_buffer.data[5],
++                        (uint8_t)client->rx_buffer.data[6], (uint8_t)client->rx_buffer.data[7],
++                        (uint8_t)client->rx_buffer.data[8], (uint8_t)client->rx_buffer.data[9],
++                        (uint8_t)client->rx_buffer.data[10], (uint8_t)client->rx_buffer.data[11],
++                        (uint8_t)client->rx_buffer.data[12], (uint8_t)client->rx_buffer.data[13],
++                        (uint8_t)client->rx_buffer.data[14], (uint8_t)client->rx_buffer.data[15],
++                        (uint8_t)client->rx_buffer.data[16], (uint8_t)client->rx_buffer.data[17],
++                        (uint8_t)client->rx_buffer.data[18], (uint8_t)client->rx_buffer.data[19],
++                        (uint8_t)client->rx_buffer.data[20], (uint8_t)client->rx_buffer.data[21],
++                        (uint8_t)client->rx_buffer.data[22], (uint8_t)client->rx_buffer.data[23],
++                        (uint8_t)client->rx_buffer.data[24], (uint8_t)client->rx_buffer.data[25],
++                        (uint8_t)client->rx_buffer.data[26], (uint8_t)client->rx_buffer.data[27],
++                        (uint8_t)client->rx_buffer.data[28], (uint8_t)client->rx_buffer.data[29],
++                        (uint8_t)client->rx_buffer.data[30], (uint8_t)client->rx_buffer.data[31]);
 +                    client->rx_buffer.pos = 0;
 +                }
 +            }

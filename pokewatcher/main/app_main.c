@@ -171,7 +171,7 @@ void app_main(void)
 
     // Check for Himax firmware update on SD card — load into PSRAM before unmounting
     {
-        FILE *fw = fopen("/sdcard/sensecap_watcher_20241106.img", "rb");
+        FILE *fw = fopen("/sdcard/himax_firmware_20240816.img", "rb");
         if (fw) {
             fseek(fw, 0, SEEK_END);
             size_t fw_size = ftell(fw);
