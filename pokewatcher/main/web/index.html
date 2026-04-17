@@ -56,12 +56,12 @@
     </div>
     <div id="char-count" style="font-size:11px;color:#5566AA;margin-top:4px;">0 / 160</div>
 
-    <h2>Background</h2>
+    <h2>Background: <span id="bg-current">#16</span></h2>
     <div class="msg-row">
-        <input id="bg-idx" type="number" min="1" max="83" value="16" style="width:60px;flex:none;">
-        <button onclick="setBg()">Set</button>
         <button onclick="setBg('prev')">Prev</button>
         <button onclick="setBg('next')">Next</button>
+        <input id="bg-idx" type="number" min="1" max="83" placeholder="#" style="width:50px;flex:none;">
+        <button onclick="setBg()">Go</button>
         <button id="rotate-btn" onclick="toggleRotate()" style="margin-left:auto;">Rotate: ON</button>
     </div>
 
@@ -85,6 +85,8 @@
     <script>
         const STATES = ['idle','working','waiting','alert','greeting','sleeping','reporting','down','wakeup'];
         const MODELS = [{id:1,name:'Person'},{id:2,name:'Pet'},{id:3,name:'Gesture'}];
+        const BG_TILES = [2,3,7,8,10,12,13,16,20,24,29,32,33,34,37,38,41,42,43,44,49,53,56,57,60,66,69,71,72,74,76,77,80,83];
+        let curBg = 16;
         let cur = 'idle';
         let curModel = 1;
         let aiLogExpanded = false;
@@ -137,12 +139,19 @@
         }
 
         async function setBg(dir) {
-            const inp = document.getElementById('bg-idx');
-            let idx = parseInt(inp.value) || 1;
-            if (dir === 'prev') idx = Math.max(1, idx - 1);
-            if (dir === 'next') idx = Math.min(83, idx + 1);
-            inp.value = idx;
+            let idx = curBg;
+            if (dir === 'prev' || dir === 'next') {
+                let pos = BG_TILES.indexOf(curBg);
+                if (pos < 0) pos = 0;
+                if (dir === 'prev') pos = (pos - 1 + BG_TILES.length) % BG_TILES.length;
+                if (dir === 'next') pos = (pos + 1) % BG_TILES.length;
+                idx = BG_TILES[pos];
+            } else {
+                idx = parseInt(document.getElementById('bg-idx').value) || curBg;
+                document.getElementById('bg-idx').value = '';
+            }
             await fetch('/api/background', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({index:idx}) });
+            poll();
         }
 
         async function toggleRotate() {
@@ -170,7 +179,7 @@
                 document.getElementById('uptime').textContent = fmt(d.uptime_seconds);
                 document.getElementById('rssi').textContent = (d.wifi_rssi || '--') + ' dBm';
                 document.getElementById('msg').textContent = d.last_message || 'None';
-                if (d.background > 0) document.getElementById('bg-idx').value = d.background;
+                if (d.background > 0) { curBg = d.background; document.getElementById('bg-current').textContent = '#' + d.background; }
                 const rb = document.getElementById('rotate-btn');
                 rb.textContent = 'Rotate: ' + (d.auto_rotate ? 'ON' : 'OFF');
                 rb.className = d.auto_rotate ? 'on' : '';

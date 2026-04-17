@@ -32,9 +32,9 @@ static SemaphoreHandle_t s_connect_sem = NULL;
 static const char *GESTURE_NAMES[] = { "Paper", "Rock", "Scissors" };
 
 // Gesture confirmation: need N consecutive detections at threshold+
-#define GESTURE_CONFIRM_COUNT 3
+#define GESTURE_CONFIRM_COUNT 4
 #define GESTURE_THRESHOLD_ROCK 82
-#define GESTURE_THRESHOLD_DEFAULT 80
+#define GESTURE_THRESHOLD_DEFAULT 85
 #define GESTURE_REDETECT_MS 6000  // same gesture re-logged after 6s
 #define GESTURE_IDLE_TIMEOUT_MS (20 * 60 * 1000)  // 20 min no object → back to person
 static int s_gesture_streak = 0;
