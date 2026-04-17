@@ -141,14 +141,16 @@ Register with `sscma_client_register_callback()`:
 
 Flash with: `sscma_client_ota_start(client, flasher, offset)` → write 256-byte chunks → `ota_finish()`
 
-## Available Models
+## Available Models (verified 2026-04-17)
 
-| Slot | Model | Classes |
-|------|-------|---------|
-| 1 | Person Detection (swift_yolo_nano_person_192) | person |
-| 2 | Pet Detection | cat, dog |
-| 3 | Gesture Detection | paper, rock, scissors |
-| 4 | Custom (user-uploaded) | varies |
+| Slot | Model | UUID | Classes |
+|------|-------|------|---------|
+| 1 | Person Detection | f2b99229ba108c82de9379c4b6ad6354 | person |
+| 2 | Pet Detection | 60084 | cat, dog, person |
+| 3 | Gesture Detection | 91331a9db811ed5cfb5cdba2e419e507 | paper, rock, scissors |
+| 4 | (empty — returns 0x102) | — | — |
+
+All three models are pre-flashed from factory. Slot 4 available for custom .tflite upload via OTA.
 
 ## Key Config Requirements
 
