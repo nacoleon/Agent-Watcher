@@ -212,10 +212,15 @@
                     const total = (d.gesture_log || []).length;
                     aiEl.innerHTML = gLog.map(e => {
                         const ago = Math.floor((uptimeMs - e.ms) / 60000);
-                        const icons = {'Paper':'\u{1F590}\uFE0F','Rock':'\u270A\uFE0F','Scissors':'\u270C\uFE0F','Object':'\u{1F440}'};
-                        const icon = icons[e.gesture] || '&#9679;';
+                        if (e.gesture === 'Arrived' || e.gesture === 'Left') {
+                            const icon = e.gesture === 'Arrived' ? '&#9650;' : '&#9660;';
+                            const color = e.gesture === 'Arrived' ? '#7BE87B' : '#AA5555';
+                            return '<span style="color:' + color + '">' + icon + ' Object ' + e.gesture + '</span> ' + ago + 'm ago';
+                        }
+                        const icons = {'Paper':'\u{1F590}\uFE0F','Rock':'\u270A\uFE0F','Scissors':'\u270C\uFE0F'};
+                        const icon = icons[e.gesture] || '\u{1F440}';
                         return icon + ' <b>' + e.gesture + '</b> (score:' + e.score + ') ' + ago + 'm ago';
-                    }).join('<br>') || 'No gestures yet';
+                    }).join('<br>') || 'No events yet';
                     aiExpand.style.display = total > 5 ? '' : 'none';
                 } else {
                     const pLog = (d.presence_log || []).slice(0, limit);

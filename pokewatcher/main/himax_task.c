@@ -30,6 +30,40 @@ static SemaphoreHandle_t s_connect_sem = NULL;
 
 static const char *GESTURE_NAMES[] = { "Paper", "Rock", "Scissors" };
 
+// Gesture confirmation: need 5 consecutive detections of same gesture at 80%+
+#define GESTURE_CONFIRM_COUNT 5
+static int s_gesture_streak = 0;
+static int s_gesture_streak_target = -1;  // which target is being streaked
+static bool s_object_present = false;
+static int64_t s_last_object_seen_ms = 0;
+#define OBJECT_LEFT_TIMEOUT_MS 10000
+
+static void process_object_presence(bool detected)
+{
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    if (detected) {
+        s_last_object_seen_ms = now_ms;
+        if (!s_object_present) {
+            s_object_present = true;
+            pw_event_t evt = { .type = PW_EVENT_GESTURE_DETECTED };
+            strncpy(evt.data.gesture.gesture, "Arrived", 15);
+            evt.data.gesture.score = 0;
+            pw_event_send(&evt);
+            ESP_LOGI(TAG, "Object arrived");
+        }
+    } else {
+        if (s_object_present && s_last_object_seen_ms > 0 &&
+            now_ms - s_last_object_seen_ms >= OBJECT_LEFT_TIMEOUT_MS) {
+            s_object_present = false;
+            pw_event_t evt = { .type = PW_EVENT_GESTURE_DETECTED };
+            strncpy(evt.data.gesture.gesture, "Left", 15);
+            evt.data.gesture.score = 0;
+            pw_event_send(&evt);
+            ESP_LOGI(TAG, "Object left (10s timeout)");
+        }
+    }
+}
+
 static void process_detection(bool person_detected)
 {
     int64_t now_ms = esp_timer_get_time() / 1000;
@@ -59,24 +93,56 @@ static void on_event(sscma_client_handle_t client, const sscma_client_reply_t *r
     int num_boxes = 0;
     esp_err_t err = sscma_utils_fetch_boxes_from_reply(reply, &boxes, &num_boxes);
     if (err != ESP_OK || boxes == NULL || num_boxes == 0) {
-        if (s_active_model != 3) process_detection(false);
+        if (s_active_model == 3) {
+            s_gesture_streak = 0;
+            s_gesture_streak_target = -1;
+            process_object_presence(false);
+        } else {
+            process_detection(false);
+        }
         return;
     }
 
     if (s_active_model == 3) {
-        // Gesture model: target 0=paper, 1=rock, 2=scissors
-        // 80%+ = confident gesture, 60-79% = generic object detected
+        // Find best detection in this frame
+        int best_idx = -1;
         for (int i = 0; i < num_boxes; i++) {
             if (boxes[i].score > 60 && boxes[i].target < 3) {
-                pw_event_t evt = { .type = PW_EVENT_GESTURE_DETECTED };
-                if (boxes[i].score >= 80) {
-                    strncpy(evt.data.gesture.gesture, GESTURE_NAMES[boxes[i].target], 15);
-                } else {
-                    strncpy(evt.data.gesture.gesture, "Object", 15);
+                if (best_idx < 0 || boxes[i].score > boxes[best_idx].score) {
+                    best_idx = i;
                 }
-                evt.data.gesture.score = boxes[i].score;
-                pw_event_send(&evt);
             }
+        }
+
+        if (best_idx >= 0 && boxes[best_idx].score >= 80) {
+            // High confidence gesture — track streak
+            int target = boxes[best_idx].target;
+            if (target == s_gesture_streak_target) {
+                s_gesture_streak++;
+            } else {
+                s_gesture_streak = 1;
+                s_gesture_streak_target = target;
+            }
+            if (s_gesture_streak == GESTURE_CONFIRM_COUNT) {
+                // Confirmed gesture after 5 consecutive detections
+                pw_event_t evt = { .type = PW_EVENT_GESTURE_DETECTED };
+                strncpy(evt.data.gesture.gesture, GESTURE_NAMES[target], 15);
+                evt.data.gesture.score = boxes[best_idx].score;
+                pw_event_send(&evt);
+                ESP_LOGI(TAG, "Gesture confirmed: %s (score=%d)", GESTURE_NAMES[target], boxes[best_idx].score);
+                s_gesture_streak = 0;  // Reset so it doesn't fire again immediately
+            }
+            process_object_presence(true);  // Also counts as object present
+        } else if (best_idx >= 0) {
+            // Low confidence (60-79%) — just object presence
+            s_gesture_streak = 0;
+            s_gesture_streak_target = -1;
+            process_object_presence(true);
+        } else {
+            // Nothing detected
+            s_gesture_streak = 0;
+            s_gesture_streak_target = -1;
+            process_object_presence(false);
         }
     } else {
         // Person/Pet model: target 0=person (model 1), target 0=cat,1=dog,2=person (model 2)
@@ -226,6 +292,9 @@ static void himax_task(void *arg)
             ESP_LOGI(TAG, "set_model(%d): 0x%x", new_model, err);
             if (err == ESP_OK) {
                 s_active_model = new_model;
+                s_gesture_streak = 0;
+                s_gesture_streak_target = -1;
+                s_object_present = false;
                 sscma_client_set_sensor(client, 1, 1, true);
                 vTaskDelay(pdMS_TO_TICKS(50));
                 sscma_client_invoke(client, -1, false, true);
