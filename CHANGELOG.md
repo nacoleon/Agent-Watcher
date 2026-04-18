@@ -5,6 +5,8 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 ## [Unreleased]
 
 ### Added
+- **Push-to-talk voice input**: Double-click knob to record 5s of 16kHz audio, HTTP POST WAV to MCP server on port 3848, whisper-node transcribes locally, text delivered to OpenClaw via `sendLoggingMessage`. RGB LED feedback: blue (recording), yellow (uploading), green (success), red (error).
+- **MCP audio server**: Express HTTP endpoint at `:3848/audio` receives WAV from Watcher, transcribes via whisper-node (whisper.cpp, Apple Silicon optimized), sends `voice_input: <text>` logging message to OpenClaw.
 - **RGB LED state blink**: WS2812 LED blinks every 10 seconds at 10% brightness with state-specific color — red (alert/down), orange (waiting), pink (greeting), green (reporting). LED turns off on knob dismiss and display sleep.
 - **Background auto-rotate toggle**: Web UI button and API field (`auto_rotate`) to pause/resume the 5-minute background rotation.
 - **OpenClaw heartbeat**: `POST /api/heartbeat` endpoint and `watcher__heartbeat` MCP tool. Watcher switches to "down" state if no heartbeat received for 1.5 hours, auto-recovers to idle on next beat. Web UI shows heartbeat status and last 5 heartbeat timestamps.
