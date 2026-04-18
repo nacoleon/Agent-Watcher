@@ -8,6 +8,7 @@ idf_component_register(
         "sprite_loader.c"
         "dialog.c"
         "web_server.c"
+        "voice_input.c"
     INCLUDE_DIRS "."
     REQUIRES
         nvs_flash

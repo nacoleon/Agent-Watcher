@@ -17,6 +17,7 @@
 #include "renderer.h"
 #include "himax_task.h"
 #include "web_server.h"
+#include "voice_input.h"
 
 static const char *TAG = "pokewatcher";
 
@@ -152,6 +153,7 @@ void app_main(void)
     // Mute speaker to prevent idle amp pops (unmute with bsp_codec_mute_set(false) when audio needed)
     bsp_codec_init();
     bsp_codec_mute_set(true);
+    pw_voice_init();
     bsp_rgb_init();
     ESP_LOGI(TAG, "[4/7] IO expander ready, LCD powered, speaker muted, RGB LED initialized");
 

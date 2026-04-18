@@ -4,6 +4,7 @@
 #include "agent_state.h"
 #include "dialog.h"
 #include "web_server.h"
+#include "voice_input.h"
 #include "sensecap-watcher.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -1036,6 +1037,9 @@ static void renderer_task(void *arg)
             s_pre_sleep_triggered = false;
             s_sleeping_state_started_ms = 0;
         }
+
+        // Check for voice recording double-click
+        pw_voice_tick();
 
         // --- Single LVGL lock for ALL display operations this frame ---
         if (!s_display_sleeping) {
