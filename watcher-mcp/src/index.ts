@@ -28,3 +28,8 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 
 startPresencePoller(server);
+
+// Exit cleanly when stdio disconnects (prevents zombie processes)
+process.stdin.on("end", () => process.exit(0));
+process.stdin.on("close", () => process.exit(0));
+transport.onclose = () => process.exit(0);
