@@ -94,6 +94,7 @@ static void knob_right_cb(void *arg, void *data)
 }
 
 static volatile bool s_knob_long_pressed = false;
+static volatile bool s_double_click = false;
 
 // Exposed for renderer to detect button press while display is off
 static volatile bool s_btn_wake_requested = false;
@@ -107,6 +108,11 @@ static void knob_btn_cb(void *arg, void *data)
 static void knob_btn_long_cb(void *arg, void *data)
 {
     s_knob_long_pressed = true;
+}
+
+static void knob_btn_double_cb(void *arg, void *data)
+{
+    s_double_click = true;
 }
 
 // Border colors per message level
@@ -232,7 +238,8 @@ void pw_dialog_init(lv_obj_t *parent)
     if (s_btn_handle) {
         iot_button_register_cb(s_btn_handle, BUTTON_PRESS_UP, knob_btn_cb, NULL);
         iot_button_register_cb(s_btn_handle, BUTTON_LONG_PRESS_START, knob_btn_long_cb, NULL);
-        ESP_LOGI(TAG, "Knob button registered (press=dismiss, long=reboot)");
+        iot_button_register_cb(s_btn_handle, BUTTON_DOUBLE_CLICK, knob_btn_double_cb, NULL);
+        ESP_LOGI(TAG, "Knob button registered (press=dismiss, long=reboot, double=voice)");
     }
 
     ESP_LOGI(TAG, "Dialog renderer initialized");
@@ -356,6 +363,15 @@ bool pw_dialog_consume_btn_wake(void)
 void pw_dialog_consume_knob_press(void)
 {
     s_knob_pressed = false;
+}
+
+bool pw_dialog_consume_double_click(void)
+{
+    if (s_double_click) {
+        s_double_click = false;
+        return true;
+    }
+    return false;
 }
 
 const char *pw_dialog_get_last_text(void)

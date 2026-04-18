@@ -16,5 +16,6 @@ void pw_dialog_prev_page(void);
 bool pw_dialog_consume_btn_wake(void);
 void pw_dialog_consume_knob_press(void);
 const char *pw_dialog_get_last_text(void);
+bool pw_dialog_consume_double_click(void);
 
 #endif
