@@ -43,6 +43,7 @@ Last updated: 2026-04-17
 - Web UI: AI Model section with 3-way toggle (Person/Pet/Gesture), expandable logs, background label + prev/next with real tile list
 - API: PUT /api/model for model switching, gesture_log + active_model in GET /api/status
 - SPI-safe renderer: prepare/commit split, single LVGL lock per frame (500ms timeout), dirty flags
+- Push-to-talk voice input: double-click knob → 5s recording (16kHz/16-bit mono) → HTTP POST WAV to MCP server → whisper-node transcription → OpenClaw via sendLoggingMessage. RGB LED feedback: blue (recording), yellow (uploading), green (success), red (error)
 
 ### Dashboard Preview (zidane-dashboard/)
 - Runs on localhost:8091 (python3 zidane-dashboard/server.py)
@@ -67,6 +68,7 @@ Last updated: 2026-04-17
 - Presence poller (5s, 2-poll debounce) sends MCP notifications: person_arrived/person_left
 - Read confirmations: message_read/queue_empty notifications to Zidane
 - Status resource: watcher://status with live device state
+- Audio receiver: Express HTTP server on :3848, whisper-node (whisper.cpp) transcription, voice_input logging messages to OpenClaw
 
 ### OpenClaw Integration
 - MCP server registered: `openclaw mcp set watcher ...`
@@ -106,7 +108,7 @@ Last updated: 2026-04-17
 - [ ] Auto-show dialog for alert/greeting/reporting states with default messages
 
 ### Future Features
-- [ ] Audio/speaker output (codec initialized and muted, ready for use)
+- [ ] Audio/speaker output — codec initialized and muted; mic input working for push-to-talk (speaker playback TBD)
 - [ ] BLE phone connectivity
 - [ ] Touch screen interaction
 
