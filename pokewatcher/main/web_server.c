@@ -5,6 +5,7 @@
 #include "dialog.h"
 #include "event_queue.h"
 #include "renderer.h"
+#include "voice_input.h"
 #include "config.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
@@ -110,6 +111,9 @@ static esp_err_t handle_api_status(httpd_req_t *req)
         cJSON_AddNumberToObject(entry, "bh", g_box_hs[i]);
         cJSON_AddItemToArray(g_arr, entry);
     }
+
+    // Voice input
+    cJSON_AddBoolToObject(root, "audio_ready", pw_voice_audio_ready());
 
     wifi_ap_record_t ap_info;
     if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
@@ -356,6 +360,28 @@ static esp_err_t handle_api_reboot(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t handle_api_audio_get(httpd_req_t *req)
+{
+    size_t size = 0;
+    const uint8_t *data = pw_voice_get_audio(&size);
+    if (!data) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"no audio\"}");
+        return ESP_OK;
+    }
+    httpd_resp_set_type(req, "audio/wav");
+    httpd_resp_send(req, (const char *)data, size);
+    return ESP_OK;
+}
+
+static esp_err_t handle_api_audio_delete(httpd_req_t *req)
+{
+    pw_voice_clear_audio();
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"ok\":true}");
+    return ESP_OK;
+}
+
 static void register_routes(httpd_handle_t server)
 {
     httpd_uri_t routes[] = {
@@ -386,6 +412,12 @@ static void register_routes(httpd_handle_t server)
 
     httpd_uri_t model_uri = { .uri = "/api/model", .method = HTTP_PUT, .handler = handle_api_model };
     httpd_register_uri_handler(server, &model_uri);
+
+    httpd_uri_t audio_get_uri = { .uri = "/api/audio", .method = HTTP_GET, .handler = handle_api_audio_get };
+    httpd_register_uri_handler(server, &audio_get_uri);
+
+    httpd_uri_t audio_del_uri = { .uri = "/api/audio", .method = HTTP_DELETE, .handler = handle_api_audio_delete };
+    httpd_register_uri_handler(server, &audio_del_uri);
 }
 
 static void init_mdns(void)

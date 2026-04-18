@@ -4,7 +4,6 @@
 #include "agent_state.h"
 #include "sensecap-watcher.h"
 #include "esp_log.h"
-#include "esp_http_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_heap_caps.h"
@@ -31,6 +30,11 @@ typedef struct __attribute__((packed)) {
 } wav_header_t;
 
 static volatile bool s_recording = false;
+
+// Audio buffer stored in PSRAM — served via GET /api/audio
+static uint8_t *s_audio_buf = NULL;
+static size_t   s_audio_size = 0;       // total WAV size (header + PCM)
+static volatile bool s_audio_ready = false;
 
 static void build_wav_header(wav_header_t *hdr, uint32_t data_size)
 {
@@ -61,19 +65,30 @@ static void voice_record_task(void *arg)
     bsp_rgb_set(0, 0, 26);  // blue
     pw_agent_state_set(PW_STATE_WORKING);
 
-    // Allocate audio buffer in PSRAM
-    uint8_t *audio_buf = heap_caps_malloc(PW_VOICE_BUF_SIZE, MALLOC_CAP_SPIRAM);
-    if (!audio_buf) {
-        ESP_LOGE(TAG, "Failed to allocate %d bytes in PSRAM for audio", PW_VOICE_BUF_SIZE);
+    // Free previous audio buffer if not yet consumed
+    if (s_audio_buf) {
+        heap_caps_free(s_audio_buf);
+        s_audio_buf = NULL;
+        s_audio_size = 0;
+        s_audio_ready = false;
+    }
+
+    // Allocate buffer for WAV header + PCM data in PSRAM
+    size_t buf_size = sizeof(wav_header_t) + PW_VOICE_BUF_SIZE;
+    uint8_t *buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        ESP_LOGE(TAG, "Failed to allocate %zu bytes in PSRAM for audio", buf_size);
         bsp_rgb_set(26, 0, 0);  // red = error
         vTaskDelay(pdMS_TO_TICKS(500));
         bsp_rgb_set(0, 0, 0);
+        pw_agent_state_set(prev_state);
         s_recording = false;
         vTaskDelete(NULL);
         return;
     }
 
-    // Record audio via I2S
+    // Record audio via I2S (write PCM after the header space)
+    uint8_t *pcm_start = buf + sizeof(wav_header_t);
     size_t total_read = 0;
     size_t chunk_size = 1024;
     int64_t start_time = esp_timer_get_time();
@@ -85,7 +100,7 @@ static void voice_record_task(void *arg)
         if (total_read + to_read > PW_VOICE_BUF_SIZE) {
             to_read = PW_VOICE_BUF_SIZE - total_read;
         }
-        esp_err_t ret = bsp_i2s_read(audio_buf + total_read, to_read, &bytes_read, 100);
+        esp_err_t ret = bsp_i2s_read(pcm_start + total_read, to_read, &bytes_read, 100);
         if (ret == ESP_OK && bytes_read > 0) {
             total_read += bytes_read;
         }
@@ -102,8 +117,8 @@ static void voice_record_task(void *arg)
     ESP_LOGI(TAG, "Recording complete: %zu bytes captured", total_read);
 
     if (total_read < 16000) {  // less than 0.5 seconds
-        ESP_LOGW(TAG, "Audio too short (%zu bytes), skipping upload", total_read);
-        heap_caps_free(audio_buf);
+        ESP_LOGW(TAG, "Audio too short (%zu bytes), discarding", total_read);
+        heap_caps_free(buf);
         bsp_rgb_set(26, 0, 0);  // red flash
         vTaskDelay(pdMS_TO_TICKS(500));
         bsp_rgb_set(0, 0, 0);
@@ -113,60 +128,24 @@ static void voice_record_task(void *arg)
         return;
     }
 
-    // Build WAV header
-    wav_header_t hdr;
-    build_wav_header(&hdr, total_read);
+    // Write WAV header at the start of the buffer
+    build_wav_header((wav_header_t *)buf, total_read);
 
-    // LED yellow = uploading
-    bsp_rgb_set(26, 18, 0);
+    // Store buffer for serving via /api/audio
+    s_audio_buf = buf;
+    s_audio_size = sizeof(wav_header_t) + total_read;
+    s_audio_ready = true;
 
-    // HTTP POST to MCP server
-    char url[64];
-    snprintf(url, sizeof(url), "http://%s:%d/audio", PW_MCP_SERVER_IP, PW_MCP_SERVER_PORT);
+    ESP_LOGI(TAG, "Audio ready for pickup (%zu bytes WAV)", s_audio_size);
 
-    esp_http_client_config_t config = {
-        .url = url,
-        .method = HTTP_METHOD_POST,
-        .timeout_ms = 30000,  // whisper transcription can take a few seconds
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
+    // Green flash = recording done
+    bsp_rgb_set(0, 26, 0);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    bsp_rgb_set(0, 0, 0);
 
-    esp_http_client_set_header(client, "Content-Type", "application/octet-stream");
-
-    // Write WAV header + PCM data
-    int content_length = sizeof(wav_header_t) + total_read;
-    esp_http_client_open(client, content_length);
-    esp_http_client_write(client, (const char *)&hdr, sizeof(wav_header_t));
-    esp_http_client_write(client, (const char *)audio_buf, total_read);
-
-    int status = esp_http_client_fetch_headers(client);
-    int http_status = esp_http_client_get_status_code(client);
-
-    if (status >= 0 && http_status == 200) {
-        ESP_LOGI(TAG, "Audio uploaded successfully (HTTP %d)", http_status);
-        // Green flash = success
-        bsp_rgb_set(0, 26, 0);
-        vTaskDelay(pdMS_TO_TICKS(500));
-    } else {
-        ESP_LOGE(TAG, "Audio upload failed (HTTP %d, fetch=%d)", http_status, status);
-        // Red flash x3 = error
-        for (int i = 0; i < 3; i++) {
-            bsp_rgb_set(26, 0, 0);
-            vTaskDelay(pdMS_TO_TICKS(200));
-            bsp_rgb_set(0, 0, 0);
-            vTaskDelay(pdMS_TO_TICKS(200));
-        }
-    }
-
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    heap_caps_free(audio_buf);
-
-    bsp_rgb_set(0, 0, 0);  // LED off
     pw_agent_state_set(prev_state);  // restore state
     s_recording = false;
 
-    ESP_LOGI(TAG, "Voice input task complete");
     vTaskDelete(NULL);
 }
 
@@ -179,6 +158,32 @@ void pw_voice_tick(void)
         ESP_LOGI(TAG, "Double-click detected — starting voice recording");
         xTaskCreate(voice_record_task, "voice_rec", 4096, NULL, 5, NULL);
     }
+}
+
+bool pw_voice_audio_ready(void)
+{
+    return s_audio_ready;
+}
+
+const uint8_t *pw_voice_get_audio(size_t *out_size)
+{
+    if (!s_audio_ready || !s_audio_buf) {
+        *out_size = 0;
+        return NULL;
+    }
+    *out_size = s_audio_size;
+    return s_audio_buf;
+}
+
+void pw_voice_clear_audio(void)
+{
+    s_audio_ready = false;
+    if (s_audio_buf) {
+        heap_caps_free(s_audio_buf);
+        s_audio_buf = NULL;
+        s_audio_size = 0;
+    }
+    ESP_LOGI(TAG, "Audio buffer cleared");
 }
 
 void pw_voice_init(void)

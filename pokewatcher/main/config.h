@@ -53,8 +53,6 @@
 #define PW_LLM_MAX_RESPONSE_LEN   512
 
 // Voice input (push-to-talk)
-#define PW_MCP_SERVER_IP       "10.0.0.17"   // Mac's IP on local network
-#define PW_MCP_SERVER_PORT     3848
 #define PW_VOICE_RECORD_MS     5000           // 5 seconds recording
 #define PW_VOICE_SAMPLE_RATE   16000
 #define PW_VOICE_SAMPLE_BITS   16
