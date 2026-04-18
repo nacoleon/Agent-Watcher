@@ -2,7 +2,7 @@
 
 ## Overview
 
-Add voice input to the Zidane Watcher via push-to-talk (double-click knob). The ESP32 records audio, HTTP POSTs it to the MCP server on Mac, which transcribes it locally using whisper-node (bundled dependency — installs with `npm install`), and delivers the text to OpenClaw as a logging message. No separate Whisper server process required.
+Add voice input to the Zidane Watcher via push-to-talk (double-click knob). The ESP32 records audio, HTTP POSTs it to the MCP server on Mac, which transcribes it locally using whisper-node (bundled dependency — installs with `npm install`), and delivers the text to OpenClaw via MCP sampling (`createMessage`). This makes voice input a first-class user message that OpenClaw responds to naturally — no special prompt engineering needed. No separate Whisper server process required.
 
 ## Architecture
 
@@ -12,8 +12,8 @@ Add voice input to the Zidane Watcher via push-to-talk (double-click knob). The 
     → Prepends 44-byte WAV header
     → HTTP POST to Mac (watcher-mcp :3848/audio)
     → whisper-node transcribes in-process
-    → MCP server sends logging message to OpenClaw: "voice_input: <transcribed text>"
-    → OpenClaw responds via existing MCP tools (display_message, set_state, etc.)
+    → MCP server calls createMessage (sampling) → OpenClaw receives it as a user message
+    → OpenClaw responds naturally via existing MCP tools (display_message, set_state, etc.)
 ```
 
 ```
@@ -23,9 +23,10 @@ ESP32 ──HTTP POST /audio──────────► │  Express :3848
        (WAV binary body)            │       ↓                ↓               │
                                     │  save temp.wav → transcribe → text     │
                                     │       ↓                                │
-                                    │  server.sendLoggingMessage()           │
+                                    │  server.createMessage() [sampling]     │
                                     │       ↓                                │
-                                    │  stdio transport ← → OpenClaw          │
+                                    │  OpenClaw receives as user message     │
+                                    │  OpenClaw responds → calls MCP tools   │
                                     └─────────────────────────────────────────┘
 ```
 
@@ -34,7 +35,8 @@ ESP32 ──HTTP POST /audio──────────► │  Express :3848
 - **Bundled dependency**: `whisper-node` compiles whisper.cpp during `npm install`. No separate server, no Docker, no Python. One `package.json` dependency.
 - **Apple Silicon optimized**: whisper.cpp compiles with Metal/Accelerate on macOS automatically.
 - **Zero extra processes**: The Express HTTP listener coexists with the stdio MCP transport in the same Node.js process.
-- **Fastest path to OpenClaw**: Audio arrives → transcribes → `sendLoggingMessage()` fires immediately. No inter-process hops, no polling.
+- **Fully wired via MCP sampling**: Uses `server.createMessage()` (the `sampling/createMessage` MCP method) to deliver transcribed text as a first-class user message. OpenClaw processes it exactly like a chat message — can call tools, reason about context, and respond naturally. No special prompt engineering or log-watching needed.
+- **Fastest path to OpenClaw**: Audio arrives → transcribes → `createMessage()` fires immediately. No inter-process hops, no polling.
 
 ## Firmware Changes (ESP32-S3)
 
@@ -158,7 +160,7 @@ Add `voice_input.c` to SRCS list.
 
 ### 2. New file: `watcher-mcp/src/audio-server.ts`
 
-Express HTTP server that receives audio from the Watcher and transcribes it.
+Express HTTP server that receives audio from the Watcher, transcribes it, and sends it to OpenClaw via MCP sampling.
 
 ```typescript
 import express from "express";
@@ -167,9 +169,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { whisper } from "whisper-node";
 import { log } from "./logger.js";
-
-const AUDIO_PORT = 3848;
-const MODEL = "base.en";  // ~140MB, fast, English-only
+import { AUDIO_PORT, WHISPER_MODEL } from "./config.js";
 
 export function startAudioServer(onTranscription: (text: string) => void): void {
   const app = express();
@@ -195,16 +195,18 @@ export function startAudioServer(onTranscription: (text: string) => void): void 
       writeFileSync(tmpFile, audioBuffer);
 
       // Transcribe
-      const result = await whisper(tmpFile, { modelName: MODEL, whisperOptions: { language: "en" } });
+      const result = await whisper(tmpFile, { modelName: WHISPER_MODEL, whisperOptions: { language: "en" } });
       const text = result.map(r => r.speech).join(" ").trim();
 
       log("audio", `Transcribed: "${text}"`);
 
+      // Respond to ESP32 immediately — don't wait for OpenClaw
+      res.json({ ok: true, text });
+
+      // Fire-and-forget: send to OpenClaw via sampling in background
       if (text) {
         onTranscription(text);
       }
-
-      res.json({ ok: true, text });
     } catch (err: any) {
       log("error", "Transcription failed", { error: err.message });
       res.status(500).json({ error: err.message });
@@ -215,7 +217,7 @@ export function startAudioServer(onTranscription: (text: string) => void): void 
 
   // Health check
   app.get("/audio/health", (_req, res) => {
-    res.json({ ok: true, model: MODEL });
+    res.json({ ok: true, model: WHISPER_MODEL });
   });
 
   app.listen(AUDIO_PORT, () => {
@@ -226,25 +228,67 @@ export function startAudioServer(onTranscription: (text: string) => void): void 
 
 ### 3. Modify: `watcher-mcp/src/index.ts`
 
-Wire up the audio server and connect transcriptions to MCP logging.
+Wire up the audio server and connect transcriptions to OpenClaw via MCP sampling (`createMessage`).
+
+**Key detail**: `McpServer` wraps the low-level `Server` class. The sampling API lives on `Server`, accessible via `mcpServer.server.createMessage()`.
 
 ```typescript
 import { startAudioServer } from "./audio-server.js";
 
-// ... existing setup ...
+// ... existing setup (server = new McpServer(...)) ...
 
 // Start audio receiver alongside MCP stdio transport
 startAudioServer(async (text: string) => {
-  // Send transcription to OpenClaw as a logging message
-  await server.sendLoggingMessage({
-    level: "info",
-    logger: "voice",
-    data: `voice_input: ${text}`,
-  });
+  log("voice", `Sending to OpenClaw via sampling: "${text}"`);
+
+  try {
+    // Use MCP sampling to send voice input as a first-class user message.
+    // OpenClaw receives this exactly like a chat message and can respond
+    // by calling any registered MCP tools (display_message, set_state, etc.)
+    const result = await server.server.createMessage({
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `[Voice input from Watcher] ${text}`,
+          },
+        },
+      ],
+      systemPrompt:
+        "The user spoke to the Watcher device via push-to-talk. " +
+        "This is transcribed speech — respond naturally using your available tools. " +
+        "Keep responses concise (under 200 chars) since they display on a small screen.",
+      maxTokens: 1024,
+    });
+
+    log("voice", "OpenClaw responded", {
+      role: result.model,
+      stopReason: result.stopReason,
+    });
+  } catch (err: any) {
+    log("error", "Sampling request failed", { error: err.message });
+
+    // Fallback: send as logging message if sampling is not supported by the client
+    await server.server.sendLoggingMessage({
+      level: "info",
+      logger: "voice",
+      data: `voice_input: ${text}`,
+    });
+  }
 });
 ```
 
-### 4. Add dependency: `express` + `@types/express`
+**How MCP sampling works**:
+- `server.server.createMessage()` sends a `sampling/createMessage` request to the MCP client (OpenClaw)
+- OpenClaw receives the `messages` array as if the user typed it
+- OpenClaw processes the message, can call any registered MCP tools, and returns the response
+- The `systemPrompt` is a hint — the client MAY modify or ignore it per the MCP spec
+- If the client doesn't support sampling, it will throw — the catch block falls back to `sendLoggingMessage`
+
+**Important**: The MCP server must declare it needs sampling support. The `McpServer` constructor already handles capability negotiation, but the client (OpenClaw) must declare `sampling` in its `ClientCapabilities` during initialization. If OpenClaw doesn't support sampling yet, the fallback logging approach still works.
+
+### 4. Add dependencies: `express` + `@types/express`
 
 ```json
 {
@@ -295,7 +339,9 @@ Agent state changes during recording:
 | WiFi down | Skip POST, flash red LED, log error | — |
 | MCP server unreachable | Retry once after 1s, then give up, flash red | — |
 | Whisper fails | — | Return 500, log error |
-| Empty transcription | — | Don't send logging message, return `{ ok: true, text: "" }` |
+| Empty transcription | — | Don't call createMessage, return `{ ok: true, text: "" }` |
+| OpenClaw doesn't support sampling | — | Falls back to `sendLoggingMessage` with `logger: "voice"` |
+| createMessage times out | — | Log error, return 504 to ESP32 |
 | Audio too short (<0.5s) | Don't POST, flash red | Reject with 400 |
 | PSRAM alloc fails | Don't record, flash red, log error | — |
 
@@ -305,7 +351,8 @@ Agent state changes during recording:
 1. `npm install` in watcher-mcp — verify whisper-node compiles
 2. Start MCP server, POST a test WAV to `:3848/audio` via curl
 3. Verify transcription appears in logs
-4. Verify `sendLoggingMessage` fires (check via MCP inspector or OpenClaw logs)
+4. Verify `createMessage` fires and OpenClaw responds (check via MCP inspector or OpenClaw logs)
+5. If OpenClaw doesn't support sampling yet, verify fallback to `sendLoggingMessage`
 
 ```bash
 # Test with a sample WAV file
@@ -379,3 +426,6 @@ curl -X POST http://localhost:3848/audio \
 8. **Thread safety**: `bsp_i2s_read()` uses `codec_mutex` internally — safe to call from any task.
 9. **Double-click vs single-click**: The `iot_button` library handles timing internally. A double-click will NOT trigger two single-press events — the library debounces correctly.
 10. **HTTP POST from ESP32**: Use `esp_http_client` (already available in ESP-IDF). Set `content_type` to `application/octet-stream` and write the WAV binary directly.
+11. **MCP sampling API**: `createMessage()` lives on the low-level `Server` class, not `McpServer`. Access it via `server.server.createMessage()` where `server` is the `McpServer` instance. The `McpServer.server` property is `readonly` and public.
+12. **Sampling fallback**: If OpenClaw doesn't declare `sampling` in its `ClientCapabilities`, `createMessage()` will throw. The code must catch this and fall back to `sendLoggingMessage`. Both paths should work.
+13. **Sampling is async**: `createMessage()` blocks until OpenClaw finishes processing (including any tool calls it makes). This could take several seconds. The Express endpoint should NOT await the full sampling round-trip — return `{ ok: true, text }` to the ESP32 immediately after transcription, then fire `createMessage()` in the background. The ESP32 doesn't need to wait for OpenClaw's response.
