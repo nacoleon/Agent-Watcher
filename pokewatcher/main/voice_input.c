@@ -3,6 +3,7 @@
 #include "dialog.h"
 #include "agent_state.h"
 #include "sensecap-watcher.h"
+#include "esp_codec_dev.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -87,22 +88,21 @@ static void voice_record_task(void *arg)
         return;
     }
 
-    // Record audio via I2S (write PCM after the header space)
-    uint8_t *pcm_start = buf + sizeof(wav_header_t);
+    // Record audio via codec device (write PCM after the header space)
+    int16_t *pcm_start = (int16_t *)(buf + sizeof(wav_header_t));
     size_t total_read = 0;
-    size_t chunk_size = 1024;
+    size_t chunk_size = 1024;  // bytes per read
     int64_t start_time = esp_timer_get_time();
     int64_t end_time = start_time + (int64_t)PW_VOICE_RECORD_MS * 1000;
 
     while (esp_timer_get_time() < end_time && total_read < PW_VOICE_BUF_SIZE) {
-        size_t bytes_read = 0;
         size_t to_read = chunk_size;
         if (total_read + to_read > PW_VOICE_BUF_SIZE) {
             to_read = PW_VOICE_BUF_SIZE - total_read;
         }
-        esp_err_t ret = bsp_i2s_read(pcm_start + total_read, to_read, &bytes_read, 100);
-        if (ret == ESP_OK && bytes_read > 0) {
-            total_read += bytes_read;
+        esp_err_t ret = bsp_get_feed_data(false, (int16_t *)((uint8_t *)pcm_start + total_read), to_read);
+        if (ret == ESP_OK) {
+            total_read += to_read;
         }
 
         // Pulse blue LED (toggle brightness every 500ms)
@@ -115,6 +115,16 @@ static void voice_record_task(void *arg)
     }
 
     ESP_LOGI(TAG, "Recording complete: %zu bytes captured", total_read);
+
+    // Amplify: mic signal is very quiet (~64 peak), boost by 16x with clipping
+    int16_t *samples = (int16_t *)pcm_start;
+    size_t num_samples = total_read / 2;
+    for (size_t i = 0; i < num_samples; i++) {
+        int32_t val = (int32_t)samples[i] * 4;
+        if (val > 32767) val = 32767;
+        if (val < -32768) val = -32768;
+        samples[i] = (int16_t)val;
+    }
 
     if (total_read < 16000) {  // less than 0.5 seconds
         ESP_LOGW(TAG, "Audio too short (%zu bytes), discarding", total_read);
@@ -188,5 +198,11 @@ void pw_voice_clear_audio(void)
 
 void pw_voice_init(void)
 {
+    // Boost mic hardware gain to max (42 dB, default is 27 dB)
+    esp_codec_dev_handle_t mic = bsp_codec_microphone_get();
+    if (mic) {
+        esp_codec_dev_set_in_gain(mic, 42.0);
+        ESP_LOGI(TAG, "Mic hardware gain set to 42 dB");
+    }
     ESP_LOGI(TAG, "Voice input initialized (double-click knob to record)");
 }

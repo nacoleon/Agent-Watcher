@@ -6,8 +6,32 @@ import { onPoll, onDeviceReboot } from "./queue.js";
 import { log } from "./logger.js";
 import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { whisper } from "whisper-node";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
+
+// Use whisper.cpp binary directly (whisper-node wrapper has parsing bugs)
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const WHISPER_CPP_DIR = join(__dirname, "..", "node_modules", "whisper-node", "lib", "whisper.cpp");
+const WHISPER_BIN = join(WHISPER_CPP_DIR, "main");
+const WHISPER_MODEL_PATH = join(WHISPER_CPP_DIR, "models", `ggml-${WHISPER_MODEL}.bin`);
+
+function transcribeWithWhisperCpp(wavPath: string): string {
+  const output = execFileSync(WHISPER_BIN, [
+    "-m", WHISPER_MODEL_PATH,
+    "-f", wavPath,
+    "-nt",
+  ], { encoding: "utf-8", timeout: 30000, stdio: ["pipe", "pipe", "pipe"] });
+  // Filter out blank audio markers and whisper log lines
+  return output
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("whisper_") && !l.startsWith("ggml_"))
+    .map((l) => l.replace(/\[BLANK_AUDIO\]/g, "").trim())
+    .filter((l) => l.length > 0)
+    .join(" ")
+    .trim();
+}
 
 export function startPresencePoller(server: McpServer): void {
   let lastPresent: boolean | null = null;
@@ -45,14 +69,7 @@ export function startPresencePoller(server: McpServer): void {
               writeFileSync(tmpFile, audioBuffer);
               log("audio", `Transcribing ${audioBuffer.length} bytes`);
 
-              const result = await whisper(tmpFile, {
-                modelName: WHISPER_MODEL,
-                whisperOptions: { language: "en" },
-              });
-              const text = result
-                .map((r: any) => r.speech)
-                .join(" ")
-                .trim();
+              const text = transcribeWithWhisperCpp(tmpFile);
 
               log("audio", `Transcribed: "${text}"`);
 
