@@ -74,11 +74,29 @@ export function startPresencePoller(server: McpServer): void {
               log("audio", `Transcribed: "${text}"`);
 
               if (text) {
-                await server.sendLoggingMessage({
-                  level: "info",
-                  logger: "voice",
-                  data: `voice_input: ${text}`,
-                });
+                // Use MCP sampling (createMessage) so OpenClaw treats this
+                // as a real user message and responds naturally
+                try {
+                  await server.server.createMessage({
+                    messages: [
+                      {
+                        role: "user" as const,
+                        content: { type: "text" as const, text: `[Voice from Watcher] ${text}` },
+                      },
+                    ],
+                    systemPrompt: "The user spoke to the Watcher device via push-to-talk. Respond naturally and use display_message to show your reply on the Watcher.",
+                    maxTokens: 200,
+                  });
+                  log("audio", "createMessage sent to OpenClaw");
+                } catch {
+                  // Fallback if client doesn't support sampling
+                  log("audio", "createMessage not supported, falling back to logging");
+                  await server.sendLoggingMessage({
+                    level: "info",
+                    logger: "voice",
+                    data: `voice_input: ${text}`,
+                  });
+                }
               }
             } finally {
               try { unlinkSync(tmpFile); } catch {}
