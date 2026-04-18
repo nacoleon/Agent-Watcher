@@ -123,7 +123,7 @@ function transcribe(wavPath: string): string {
 function sendToZidane(message: string): void {
   try {
     execSync(
-      `openclaw agent --agent main -m ${JSON.stringify(message)} --timeout 60`,
+      `openclaw agent --agent main -m ${JSON.stringify(message)} --deliver --timeout 60`,
       { encoding: "utf-8", timeout: 70000, stdio: ["pipe", "pipe", "pipe"] }
     );
     log("openclaw", `Sent to Zidane: "${message}"`);
@@ -137,9 +137,17 @@ let lastPresent: boolean | null = null;
 let lastUptime: number | null = null;
 let debounceCounter = 0;
 
+let pollCount = 0;
+
 async function poll(): Promise<void> {
   try {
     const status = await httpGet("/api/status");
+    pollCount++;
+
+    // Periodic status log every 60 polls (~5 min)
+    if (pollCount % 60 === 1) {
+      log("poll", `alive — uptime=${status.uptime_seconds}s audio_ready=${status.audio_ready} person=${status.person_present}`);
+    }
 
     // Reboot detection
     if (lastUptime !== null && status.uptime_seconds < lastUptime) {
