@@ -9,3 +9,6 @@ export const VALID_STATES = [
 ] as const;
 
 export type AgentState = typeof VALID_STATES[number];
+
+export const AUDIO_PORT = 3848;
+export const WHISPER_MODEL = "base.en";
