@@ -43,7 +43,9 @@ Last updated: 2026-04-17
 - Web UI: AI Model section with 3-way toggle (Person/Pet/Gesture), expandable logs, background label + prev/next with real tile list
 - API: PUT /api/model for model switching, gesture_log + active_model in GET /api/status
 - SPI-safe renderer: prepare/commit split, single LVGL lock per frame (500ms timeout), dirty flags
-- Push-to-talk voice input: double-click knob → 5s recording (16kHz/16-bit mono) → HTTP POST WAV to MCP server → whisper-node transcription → OpenClaw via sendLoggingMessage. RGB LED feedback: blue (recording), yellow (uploading), green (success), red (error)
+- Push-to-talk voice input: double-click knob → 10s recording (16kHz/16-bit mono) → stored in PSRAM → daemon polls, fetches WAV, whisper.cpp transcribes → OpenClaw via `openclaw agent`. RGB LED: blue (recording), green (ready)
+- TTS speaker output: `watcher__speak` MCP tool → Piper TTS on Mac → resample 22050→16000 Hz → stream PCM to `POST /api/audio/play` → speaker. Voice selection in web UI with NVS persistence
+- Standalone watcher daemon: LaunchAgent (`ai.openclaw.watcher-daemon`) polls 24/7 for voice audio, presence events, independent of MCP sessions
 
 ### Dashboard Preview (zidane-dashboard/)
 - Runs on localhost:8091 (python3 zidane-dashboard/server.py)
@@ -108,7 +110,7 @@ Last updated: 2026-04-17
 - [ ] Auto-show dialog for alert/greeting/reporting states with default messages
 
 ### Future Features
-- [ ] Audio/speaker output — codec initialized and muted; mic input working for push-to-talk (speaker playback TBD)
+- [x] Audio/speaker — mic input (push-to-talk) and speaker output (TTS via Piper) both working
 - [ ] BLE phone connectivity
 - [ ] Touch screen interaction
 
