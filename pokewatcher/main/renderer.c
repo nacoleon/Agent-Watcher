@@ -261,7 +261,7 @@ typedef struct {
 
 // Agent state behavior parameters
 static const mood_behavior_t STATE_BEHAVIORS[] = {
-    [PW_STATE_IDLE]      = { .walk_chance = 60, .turn_chance = 20, .walk_steps_min = 6,  .walk_steps_max = 14, .speed_x10 = 25, .bounce_amp = 0, .pause_min = 20,  .pause_max = 40  },
+    [PW_STATE_IDLE]      = { .walk_chance = 120, .turn_chance = 20, .walk_steps_min = 15, .walk_steps_max = 30, .speed_x10 = 35, .bounce_amp = 0, .pause_min = 10,  .pause_max = 40  },
     [PW_STATE_WORKING]   = { .walk_chance = 50, .turn_chance = 30, .walk_steps_min = 8,  .walk_steps_max = 16, .speed_x10 = 25, .bounce_amp = 0, .pause_min = 20,  .pause_max = 50  },
     [PW_STATE_WAITING]   = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
     [PW_STATE_ALERT]     = { .walk_chance = 0,  .turn_chance = 0,  .walk_steps_min = 0,  .walk_steps_max = 0,  .speed_x10 = 0,  .bounce_amp = 0, .pause_min = 100, .pause_max = 200 },
@@ -307,7 +307,9 @@ static volatile bool s_state_changed = false;
 #define CENTER_Y   (PW_DISPLAY_HEIGHT / 2)
 #define SPRITE_HALF (PW_SPRITE_DST_SIZE / 2)
 // Circular boundary: keep sprite center within this radius of display center
-#define MOVE_RADIUS (CENTER_X - SPRITE_HALF - 10)
+#define MOVE_RADIUS (CENTER_X - SPRITE_HALF + 10)
+// Horizon line: sprite center never goes above this Y (keeps sprite on the ground in backgrounds)
+#define WALK_Y_MIN  160
 
 static uint32_t s_rand_state = 0;
 
@@ -346,13 +348,19 @@ static void clamp_pos(void)
         s_pos_x10 = (int)((CENTER_X + dx * scale) * 10);
         s_pos_y10 = (int)((CENTER_Y + dy * scale) * 10);
     }
+    // Horizon clamp: sprite center never goes above WALK_Y_MIN
+    if (s_pos_y10 < WALK_Y_MIN * 10) {
+        s_pos_y10 = WALK_Y_MIN * 10;
+    }
 }
 
 static bool at_boundary(void)
 {
     int dx = s_pos_x10 / 10 - CENTER_X;
     int dy = s_pos_y10 / 10 - CENTER_Y;
-    return (dx * dx + dy * dy) >= (MOVE_RADIUS - 5) * (MOVE_RADIUS - 5);
+    // Circular boundary or horizon clamp
+    return (dx * dx + dy * dy) >= (MOVE_RADIUS - 5) * (MOVE_RADIUS - 5)
+        || s_pos_y10 <= (WALK_Y_MIN + 5) * 10;
 }
 
 static void set_anim_by_name(const char *prefix, facing_dir_t dir)
