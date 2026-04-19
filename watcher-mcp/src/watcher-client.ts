@@ -97,3 +97,48 @@ export function getAudio(): Promise<Buffer> {
 export async function clearAudio(): Promise<any> {
   return request("DELETE", "/api/audio");
 }
+
+export async function getVoiceConfig(): Promise<{
+  voice: string;
+  volume: number;
+}> {
+  return request("GET", "/api/voice");
+}
+
+export function playAudio(pcm: Buffer): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const url = new URL("/api/audio/play", WATCHER_URL);
+    const req = http.request(
+      {
+        hostname: url.hostname,
+        port: url.port || 80,
+        path: url.pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Length": pcm.length,
+        },
+        timeout: 30000,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString();
+          try {
+            resolve(JSON.parse(text));
+          } catch {
+            resolve(text);
+          }
+        });
+      }
+    );
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("timeout"));
+    });
+    req.write(pcm);
+    req.end();
+  });
+}

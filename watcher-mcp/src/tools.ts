@@ -4,6 +4,7 @@ import { VALID_STATES } from "./config.js";
 import * as watcher from "./watcher-client.js";
 import { enqueue, getQueueState } from "./queue.js";
 import { log } from "./logger.js";
+import { textToSpeech } from "./tts.js";
 
 function error(msg: string) {
   return { content: [{ type: "text" as const, text: msg }], isError: true };
@@ -138,6 +139,62 @@ export function registerTools(server: McpServer): void {
       } catch (err: any) {
         log("heartbeat", "FAILED — watcher unreachable", { error: err.message });
         return error(`Watcher error: ${err.message}`);
+      }
+    }
+  );
+
+  server.registerTool(
+    "speak",
+    {
+      title: "Speak (TTS)",
+      description:
+        "Speak text aloud through the Watcher's speaker using text-to-speech. " +
+        "Use this for responding to voice input from the Watcher. " +
+        "Keep responses short and conversational (1-2 sentences). " +
+        "The voice parameter is optional — defaults to the voice configured on the device.",
+      inputSchema: {
+        text: z.string().describe("Text to speak aloud"),
+        voice: z
+          .string()
+          .optional()
+          .describe(
+            "Piper voice model (e.g. en_US-amy-medium). Omit to use device default."
+          ),
+      },
+    },
+    async ({ text, voice }: { text: string; voice?: string }) => {
+      if (!text.trim()) {
+        return error("No text to speak");
+      }
+      log("tool", "speak", { voice, text: text.slice(0, 80) });
+      try {
+        if (!voice) {
+          const config = await watcher.getVoiceConfig();
+          voice = config.voice;
+        }
+
+        const pcm = await textToSpeech(text, voice!);
+        log(
+          "tts",
+          `Generated ${pcm.length} bytes of PCM (${(pcm.length / 32000).toFixed(1)}s)`
+        );
+
+        const result = await watcher.playAudio(pcm);
+
+        if (result?.error === "speaker busy") {
+          log("tts", "Speaker busy, retrying in 1s");
+          await new Promise((r) => setTimeout(r, 1000));
+          await watcher.playAudio(pcm);
+        }
+
+        return ok({
+          spoke: text,
+          voice,
+          duration_s: +(pcm.length / 32000).toFixed(1),
+        });
+      } catch (err: any) {
+        log("error", "speak failed", { error: err.message });
+        return error(`Speak failed: ${err.message}`);
       }
     }
   );
