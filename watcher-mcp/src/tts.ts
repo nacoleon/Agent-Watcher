@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { log } from "./logger.js";
 
 const PIPER_VOICES_DIR = "/tmp/piper-voices";
+const DEFAULT_LENGTH_SCALE = 0.7;
 
 /**
  * Run Piper TTS and return 16kHz 16-bit mono PCM buffer.
@@ -61,7 +62,7 @@ async function ensureModel(voice: string): Promise<string> {
 
 function runPiper(text: string, modelPath: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const proc = spawn("piper", ["--model", modelPath, "--output-raw"], {
+    const proc = spawn("piper", ["--model", modelPath, "--output-raw", "--length-scale", String(DEFAULT_LENGTH_SCALE)], {
       stdio: ["pipe", "pipe", "pipe"],
     });
 

@@ -26,8 +26,8 @@ static int s_heartbeat_log_count = 0;
 
 // Speaker / voice config
 static volatile bool s_playing = false;
-static char s_voice_name[64] = "en_US-amy-medium";
-static int s_speaker_volume = 70;
+static char s_voice_name[64] = "en_US-bryce-medium";
+static int s_speaker_volume = 90;
 
 static void load_voice_config(void)
 {
