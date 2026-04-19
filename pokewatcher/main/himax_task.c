@@ -345,6 +345,9 @@ static void himax_task(void *arg)
                 s_last_confirmed_gesture = -1;
                 s_last_confirmed_ms = 0;
                 s_object_present = false;
+                s_last_object_seen_ms = 0;  // Reset so idle timeout doesn't fire immediately
+                s_person_present = false;   // Reset so next person triggers auto-switch
+                s_last_person_seen_ms = 0;
                 sscma_client_set_sensor(client, 1, 1, true);
                 vTaskDelay(pdMS_TO_TICKS(50));
                 sscma_client_invoke(client, -1, false, true);
