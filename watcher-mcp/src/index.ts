@@ -29,7 +29,7 @@ await server.connect(transport);
 
 startPresencePoller(server);
 
-// Exit cleanly when stdio disconnects (prevents zombie processes)
-process.stdin.on("end", () => process.exit(0));
-process.stdin.on("close", () => process.exit(0));
-transport.onclose = () => process.exit(0);
+// Exit cleanly when stdio transport closes (prevents zombie processes)
+transport.onclose = () => {
+  setTimeout(() => process.exit(0), 1000);  // grace period for pending writes
+};
