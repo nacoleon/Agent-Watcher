@@ -14,6 +14,8 @@
 #include "mdns.h"
 #include "cJSON.h"
 #include <string.h>
+#include "nvs_flash.h"
+#include "nvs.h"
 
 static const char *TAG = "pw_web";
 static httpd_handle_t s_server = NULL;
@@ -21,6 +23,33 @@ static volatile int64_t s_last_heartbeat_ms = 0;
 #define HEARTBEAT_LOG_SIZE 5
 static int64_t s_heartbeat_log[HEARTBEAT_LOG_SIZE] = {0};
 static int s_heartbeat_log_count = 0;
+
+// Speaker / voice config
+static volatile bool s_playing = false;
+static char s_voice_name[64] = "en_US-amy-medium";
+static int s_speaker_volume = 70;
+
+static void load_voice_config(void)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("pokewatcher", NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof(s_voice_name);
+        nvs_get_str(nvs, "voice", s_voice_name, &len);
+        nvs_get_i32(nvs, "volume", (int32_t *)&s_speaker_volume);
+        nvs_close(nvs);
+    }
+}
+
+static void save_voice_config(void)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("pokewatcher", NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_str(nvs, "voice", s_voice_name);
+        nvs_set_i32(nvs, "volume", s_speaker_volume);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+}
 
 static int recv_full_body(httpd_req_t *req, char *buf, int buf_size)
 {
@@ -113,6 +142,10 @@ static esp_err_t handle_api_status(httpd_req_t *req)
     }
 
     // Voice input
+    // Voice config
+    cJSON_AddStringToObject(root, "voice", s_voice_name);
+    cJSON_AddNumberToObject(root, "speaker_volume", s_speaker_volume);
+
     cJSON_AddBoolToObject(root, "audio_ready", pw_voice_audio_ready());
 
     wifi_ap_record_t ap_info;
@@ -382,6 +415,92 @@ static esp_err_t handle_api_audio_delete(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t handle_api_audio_play(httpd_req_t *req)
+{
+    if (s_playing) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"speaker busy\"}");
+        return ESP_OK;
+    }
+    s_playing = true;
+
+    ESP_LOGI(TAG, "Playing audio: %zu bytes, volume=%d", req->content_len, s_speaker_volume);
+
+    bsp_codec_mute_set(false);
+    bsp_codec_volume_set(s_speaker_volume, NULL);
+
+    char buf[1024];
+    int remaining = req->content_len;
+    while (remaining > 0) {
+        int to_read = remaining < (int)sizeof(buf) ? remaining : (int)sizeof(buf);
+        int received = httpd_req_recv(req, buf, to_read);
+        if (received <= 0) {
+            ESP_LOGE(TAG, "Audio recv error: %d", received);
+            break;
+        }
+        size_t written = 0;
+        bsp_i2s_write(buf, received, &written, 1000);
+        remaining -= received;
+    }
+
+    bsp_codec_mute_set(true);
+    s_playing = false;
+
+    ESP_LOGI(TAG, "Audio playback complete");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"ok\":true}");
+    return ESP_OK;
+}
+
+static esp_err_t handle_api_voice_get(httpd_req_t *req)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "voice", s_voice_name);
+    cJSON_AddNumberToObject(root, "volume", s_speaker_volume);
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
+    free(json);
+    return ESP_OK;
+}
+
+static esp_err_t handle_api_voice_put(httpd_req_t *req)
+{
+    char body[256];
+    int len = recv_full_body(req, body, sizeof(body));
+    if (len < 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad request");
+        return ESP_OK;
+    }
+    body[len] = '\0';
+    cJSON *root = cJSON_Parse(body);
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON *voice = cJSON_GetObjectItem(root, "voice");
+    cJSON *volume = cJSON_GetObjectItem(root, "volume");
+
+    if (voice && cJSON_IsString(voice)) {
+        strncpy(s_voice_name, voice->valuestring, sizeof(s_voice_name) - 1);
+        s_voice_name[sizeof(s_voice_name) - 1] = '\0';
+    }
+    if (volume && cJSON_IsNumber(volume)) {
+        s_speaker_volume = (int)volume->valuedouble;
+        if (s_speaker_volume < 0) s_speaker_volume = 0;
+        if (s_speaker_volume > 95) s_speaker_volume = 95;
+    }
+
+    save_voice_config();
+    cJSON_Delete(root);
+
+    ESP_LOGI(TAG, "Voice config updated: voice=%s volume=%d", s_voice_name, s_speaker_volume);
+    return handle_api_voice_get(req);
+}
+
 static void register_routes(httpd_handle_t server)
 {
     httpd_uri_t routes[] = {
@@ -418,6 +537,15 @@ static void register_routes(httpd_handle_t server)
 
     httpd_uri_t audio_del_uri = { .uri = "/api/audio", .method = HTTP_DELETE, .handler = handle_api_audio_delete };
     httpd_register_uri_handler(server, &audio_del_uri);
+
+    httpd_uri_t audio_play_uri = { .uri = "/api/audio/play", .method = HTTP_POST, .handler = handle_api_audio_play };
+    httpd_register_uri_handler(server, &audio_play_uri);
+
+    httpd_uri_t voice_get_uri = { .uri = "/api/voice", .method = HTTP_GET, .handler = handle_api_voice_get };
+    httpd_register_uri_handler(server, &voice_get_uri);
+
+    httpd_uri_t voice_put_uri = { .uri = "/api/voice", .method = HTTP_PUT, .handler = handle_api_voice_put };
+    httpd_register_uri_handler(server, &voice_put_uri);
 }
 
 static void init_mdns(void)
@@ -435,11 +563,14 @@ static void init_mdns(void)
 
 void pw_web_server_start(void)
 {
+    load_voice_config();
+    ESP_LOGI(TAG, "Voice config: voice=%s volume=%d", s_voice_name, s_speaker_volume);
+
     init_mdns();
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = PW_WEB_SERVER_PORT;
-    config.max_uri_handlers = 16;
+    config.max_uri_handlers = 20;
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.lru_purge_enable = true;
 

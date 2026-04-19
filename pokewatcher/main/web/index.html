@@ -80,6 +80,31 @@
         </div>
     </div>
 
+    <h2>Voice: <span id="voice-current">en_US-amy-medium</span></h2>
+    <div class="card" style="font-size:12px;">
+        <div class="stat">
+            <span class="label">Voice</span>
+            <select id="voice-select" onchange="setVoice()" style="flex:1;padding:5px;background:#1a1a4e;border:1px solid #2a2a5e;border-radius:6px;color:#e0e0e0;font-family:inherit;font-size:12px;">
+                <option value="en_US-amy-medium">Amy (US)</option>
+                <option value="en_US-bryce-medium">Bryce (US)</option>
+                <option value="en_US-danny-low">Danny (US)</option>
+                <option value="en_US-hfc_female-medium">HFC Female (US)</option>
+                <option value="en_US-hfc_male-medium">HFC Male (US)</option>
+                <option value="en_US-joe-medium">Joe (US)</option>
+                <option value="en_US-john-medium">John (US)</option>
+                <option value="en_US-kristin-medium">Kristin (US)</option>
+                <option value="en_GB-alan-medium">Alan (GB)</option>
+                <option value="en_GB-alba-medium">Alba (GB)</option>
+                <option value="en_GB-jenny_dioco-medium">Jenny (GB)</option>
+            </select>
+        </div>
+        <div class="stat">
+            <span class="label">Volume</span>
+            <input id="vol-slider" type="range" min="0" max="95" value="70" onchange="setVoice()" style="flex:1;">
+            <span id="vol-val" style="min-width:30px;text-align:right;">70</span>
+        </div>
+    </div>
+
     <button class="reboot" onclick="reboot()">Reboot Watcher</button>
 
     <script>
@@ -167,6 +192,16 @@
             document.body.innerHTML = '<div style="text-align:center;margin-top:40vh;color:#7BE87B;font-family:monospace"><h2>Rebooting...</h2><p>Refresh in 10 seconds</p></div>';
         }
 
+        async function setVoice() {
+            const voice = document.getElementById('voice-select').value;
+            const volume = parseInt(document.getElementById('vol-slider').value);
+            document.getElementById('vol-val').textContent = volume;
+            await fetch('/api/voice', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({voice, volume}) });
+        }
+        document.getElementById('vol-slider').addEventListener('input', function() {
+            document.getElementById('vol-val').textContent = this.value;
+        });
+
         async function poll() {
             try {
                 const r = await fetch('/api/status');
@@ -211,6 +246,16 @@
                     const b = document.getElementById('model-' + m.id);
                     if (b) b.className = m.id === curModel ? 'on' : '';
                 });
+
+                // Voice config
+                if (d.voice) {
+                    document.getElementById('voice-current').textContent = d.voice;
+                    document.getElementById('voice-select').value = d.voice;
+                }
+                if (d.speaker_volume !== undefined) {
+                    document.getElementById('vol-slider').value = d.speaker_volume;
+                    document.getElementById('vol-val').textContent = d.speaker_volume;
+                }
 
                 // AI log — presence for person/pet, gestures for gesture model
                 const aiEl = document.getElementById('ai-log');
