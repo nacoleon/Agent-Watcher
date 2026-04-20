@@ -464,7 +464,7 @@ static void behavior_tick(void)
             s_state_visuals_dirty = true;  // re-trigger ZZZ show/hide after transition
             ESP_LOGI(TAG, "Transition complete: %s", pw_agent_state_to_string(s_current_state));
         } else {
-            // Pick facing direction toward target
+            // Pick facing direction toward target (dominant axis)
             if (abs(dx) > abs(dy)) {
                 s_facing = dx > 0 ? DIR_RIGHT : DIR_LEFT;
             } else {
@@ -472,15 +472,14 @@ static void behavior_tick(void)
             }
             set_anim_by_name("walk", s_facing);
 
-            // Move toward target at transition speed
-            int speed = 20;  // slightly faster than normal walk
-            if (abs(dx) > abs(dy)) {
-                s_pos_x10 += (dx > 0 ? speed : -speed);
-                // small y correction
-                if (abs(dy) > 50) s_pos_y10 += (dy > 0 ? speed / 2 : -speed / 2);
-            } else {
-                s_pos_y10 += (dy > 0 ? speed : -speed);
-                if (abs(dx) > 50) s_pos_x10 += (dx > 0 ? speed / 2 : -speed / 2);
+            // Move toward target in a straight line (both axes proportionally)
+            int speed = 20;
+            float fdx = (float)dx;
+            float fdy = (float)dy;
+            float dist = sqrtf(fdx * fdx + fdy * fdy);
+            if (dist > 5.0f) {
+                s_pos_x10 += (int)(fdx / dist * speed);
+                s_pos_y10 += (int)(fdy / dist * speed);
             }
         }
         break;
