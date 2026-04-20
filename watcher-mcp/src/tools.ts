@@ -1,10 +1,52 @@
+import http from "node:http";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { VALID_STATES } from "./config.js";
 import * as watcher from "./watcher-client.js";
-import { enqueue, getQueueState } from "./queue.js";
 import { log } from "./logger.js";
 import { textToSpeech } from "./tts.js";
+
+// --- Daemon API client (message queue lives in the daemon) ---
+const DAEMON_API_PORT = 8378;
+
+function daemonRequest(method: string, path: string, body?: object): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const data = body ? JSON.stringify(body) : undefined;
+    const req = http.request(
+      {
+        hostname: "127.0.0.1",
+        port: DAEMON_API_PORT,
+        path,
+        method,
+        headers: data
+          ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) }
+          : {},
+        timeout: 5000,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString();
+          try {
+            const json = JSON.parse(text);
+            if (res.statusCode && res.statusCode >= 400) {
+              reject(new Error(json.error || `daemon returned ${res.statusCode}`));
+            } else {
+              resolve(json);
+            }
+          } catch {
+            reject(new Error(`daemon returned non-JSON: ${text.slice(0, 100)}`));
+          }
+        });
+      }
+    );
+    req.on("error", (err) => reject(new Error(`Daemon unreachable: ${err.message}`)));
+    req.on("timeout", () => { req.destroy(); reject(new Error("Daemon timeout")); });
+    if (data) req.write(data);
+    req.end();
+  });
+}
 
 function error(msg: string) {
   return { content: [{ type: "text" as const, text: msg }], isError: true };
@@ -41,7 +83,7 @@ export function registerTools(server: McpServer): void {
     async ({ text, state, level }: { text: string; state: string; level: string }) => {
       log("tool", "display_message", { state, level, text: text.slice(0, 80) });
       try {
-        const result = await enqueue(text, level, state);
+        const result = await daemonRequest("POST", "/queue", { text, level, state });
         log("tool", "display_message result", result);
         return ok(result);
       } catch (err: any) {
@@ -100,7 +142,11 @@ export function registerTools(server: McpServer): void {
         "Check the message queue: whether a message is currently showing, and what's pending.",
     },
     async () => {
-      return ok(getQueueState());
+      try {
+        return ok(await daemonRequest("GET", "/queue"));
+      } catch (err: any) {
+        return error(`Daemon error: ${err.message}`);
+      }
     }
   );
 

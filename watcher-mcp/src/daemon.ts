@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Watcher Daemon — standalone background poller
+ * Watcher Daemon — standalone background poller + message queue owner
  *
  * Runs 24/7 via LaunchAgent. Polls the Watcher every 5s for:
  * - Voice audio (audio_ready) → transcribe → send to OpenClaw
@@ -8,8 +8,11 @@
  * - Message dismissals → trigger next queued message
  * - Device reboots → re-send current message
  *
+ * Exposes a localhost HTTP API on port 8378 for MCP servers to
+ * enqueue messages and query queue state. This keeps the MCP servers
+ * stateless (no poller, no timers) so zombie processes are harmless.
+ *
  * Sends events to OpenClaw via `openclaw agent` CLI command.
- * Independent of the MCP server (which only runs during active conversations).
  */
 
 import http from "node:http";
@@ -24,6 +27,7 @@ const WATCHER_URL = "http://10.0.0.40";
 const POLL_INTERVAL_MS = 5000;
 const DEBOUNCE_COUNT = 2;
 const WHISPER_MODEL = "base.en";
+const DAEMON_API_PORT = 8378;
 
 // --- Paths ---
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -104,6 +108,133 @@ function httpDelete(path: string): Promise<any> {
   });
 }
 
+function httpJsonRequest(method: string, path: string, body: object): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const url = new URL(path, WATCHER_URL);
+    const data = JSON.stringify(body);
+    const req = http.request(
+      {
+        hostname: url.hostname,
+        port: url.port || 80,
+        path: url.pathname,
+        method,
+        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) },
+        timeout: 5000,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString();
+          try { resolve(JSON.parse(text)); } catch { resolve(text); }
+        });
+      }
+    );
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+    req.write(data);
+    req.end();
+  });
+}
+
+// --- Message Queue (owned by daemon, called by MCP via HTTP API) ---
+
+interface QueuedMessage {
+  text: string;
+  level: string;
+  state?: string;
+}
+
+const MAX_QUEUE_SIZE = 10;
+let msgQueue: QueuedMessage[] = [];
+let currentlyShowing = false;
+let lastDismissCount = -1;
+let lastMessage: QueuedMessage | null = null;
+
+async function enqueue(
+  text: string,
+  level: string,
+  state?: string
+): Promise<{ sent: boolean; queued: boolean; position?: number; pending: number }> {
+  if (msgQueue.length >= MAX_QUEUE_SIZE) {
+    throw new Error(`queue full (${MAX_QUEUE_SIZE} messages pending)`);
+  }
+
+  if (!currentlyShowing) {
+    if (state) await httpJsonRequest("PUT", "/api/agent-state", { state });
+    await httpJsonRequest("POST", "/api/message", { text, level });
+    currentlyShowing = true;
+    lastMessage = { text, level, state };
+    log("queue", `sent immediately: "${text.slice(0, 80)}"`, { state, level });
+    return { sent: true, queued: false, pending: msgQueue.length };
+  }
+
+  msgQueue.push({ text, level, state });
+  log("queue", `queued at position ${msgQueue.length}: "${text.slice(0, 80)}"`);
+  return { sent: false, queued: true, position: msgQueue.length, pending: msgQueue.length };
+}
+
+async function onDismiss(dismissCount: number): Promise<void> {
+  // First poll — just record the baseline
+  if (lastDismissCount < 0) {
+    lastDismissCount = dismissCount;
+    return;
+  }
+
+  // No new dismissals
+  if (dismissCount === lastDismissCount) return;
+
+  // One or more dismissals happened since last poll
+  const dismissals = dismissCount - lastDismissCount;
+  lastDismissCount = dismissCount;
+  currentlyShowing = false;
+  log("queue", `dismiss detected (${dismissals} new, total=${dismissCount}, pending=${msgQueue.length})`);
+
+  if (msgQueue.length > 0) {
+    const next = msgQueue.shift()!;
+    try {
+      if (next.state) await httpJsonRequest("PUT", "/api/agent-state", { state: next.state });
+      await httpJsonRequest("POST", "/api/message", { text: next.text, level: next.level });
+      currentlyShowing = true;
+      lastMessage = next;
+      log("queue", `sent next from queue: "${next.text.slice(0, 80)}"`);
+    } catch {
+      msgQueue.unshift(next);
+    }
+  } else {
+    log("queue", "queue empty after dismiss");
+  }
+}
+
+async function onReboot(): Promise<void> {
+  lastDismissCount = 0;
+
+  // Resend the message that was showing when the device died
+  if (currentlyShowing && lastMessage) {
+    log("queue", "resending current message after reboot");
+    try {
+      if (lastMessage.state) await httpJsonRequest("PUT", "/api/agent-state", { state: lastMessage.state });
+      await httpJsonRequest("POST", "/api/message", { text: lastMessage.text, level: lastMessage.level });
+    } catch {
+      // Device may still be booting — put it back in queue front
+      msgQueue.unshift(lastMessage);
+      currentlyShowing = false;
+    }
+  }
+}
+
+function getQueueState(): {
+  currently_showing: boolean;
+  pending: QueuedMessage[];
+  count: number;
+} {
+  return {
+    currently_showing: currentlyShowing,
+    pending: [...msgQueue],
+    count: msgQueue.length,
+  };
+}
+
 // --- Whisper ---
 function transcribe(wavPath: string): string {
   const output = execFileSync(WHISPER_BIN, [
@@ -152,8 +283,12 @@ async function poll(): Promise<void> {
     // Reboot detection
     if (lastUptime !== null && status.uptime_seconds < lastUptime) {
       log("reboot", `Watcher rebooted (uptime ${lastUptime}s → ${status.uptime_seconds}s)`);
+      await onReboot();
     }
     lastUptime = status.uptime_seconds;
+
+    // Message queue dismiss detection
+    await onDismiss(status.dismiss_count);
 
     // Voice audio pickup
     if (status.audio_ready) {
@@ -225,5 +360,54 @@ if (!existsSync(WHISPER_MODEL_PATH)) {
   process.exit(1);
 }
 
+// --- Daemon HTTP API (for MCP servers to enqueue messages) ---
+
+function readBody(req: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: string[] = [];
+    req.on("data", (c: Buffer) => chunks.push(c.toString()));
+    req.on("end", () => resolve(chunks.join("")));
+    req.on("error", reject);
+  });
+}
+
+const apiServer = http.createServer(async (req, res) => {
+  try {
+    if (req.method === "POST" && req.url === "/queue") {
+      const body = await readBody(req);
+      const { text, level, state } = JSON.parse(body);
+      if (!text || !level) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "text and level are required" }));
+        return;
+      }
+      const result = await enqueue(text, level, state);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+    } else if (req.method === "GET" && req.url === "/queue") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(getQueueState()));
+    } else {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "not found" }));
+    }
+  } catch (err: any) {
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: err.message }));
+  }
+});
+
+apiServer.listen(DAEMON_API_PORT, "127.0.0.1", () => {
+  log("system", `Daemon API listening on http://127.0.0.1:${DAEMON_API_PORT}`);
+});
+
+apiServer.on("error", (err: any) => {
+  log("error", `Daemon API server failed to start: ${err.message}`);
+  if (err.code === "EADDRINUSE") {
+    log("error", `Port ${DAEMON_API_PORT} already in use — another daemon instance running?`);
+  }
+});
+
+// --- Start polling ---
 setInterval(poll, POLL_INTERVAL_MS);
 poll(); // first poll immediately

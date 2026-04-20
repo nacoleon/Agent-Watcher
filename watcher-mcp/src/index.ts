@@ -2,16 +2,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerTools } from "./tools.js";
 import { registerResources } from "./resources.js";
-import { startPresencePoller } from "./presence.js";
-import { initQueue } from "./queue.js";
-import { initLogger } from "./logger.js";
+import { initLogger, log } from "./logger.js";
 
 initLogger();
+log("system", `MCP server started pid=${process.pid}`);
 
 const server = new McpServer(
   {
     name: "watcher",
-    version: "1.3.0",
+    version: "1.4.0",
   },
   {
     capabilities: {
@@ -20,16 +19,23 @@ const server = new McpServer(
   }
 );
 
-initQueue(server);
 registerTools(server);
 registerResources(server);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
 
-startPresencePoller(server);
+// --- Lifecycle: clean exit when gateway closes the pipe ---
+// The MCP server is now stateless (no poller, no queue, no timers).
+// Zombie processes are harmless — they just sit idle using ~5MB RAM.
 
-// Exit cleanly when stdio transport closes (prevents zombie processes)
-transport.onclose = () => {
-  setTimeout(() => process.exit(0), 1000);  // grace period for pending writes
-};
+function shutdown(reason: string): void {
+  log("exit", `pid=${process.pid} reason="${reason}"`);
+  setTimeout(() => process.exit(0), 500);
+}
+
+transport.onclose = () => shutdown("transport closed");
+process.stdin.on("end", () => shutdown("stdin EOF"));
+process.stdin.on("close", () => shutdown("stdin closed"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
