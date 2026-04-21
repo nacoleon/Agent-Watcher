@@ -8,7 +8,9 @@
 
 import WebSocket from "ws";
 import { randomUUID } from "node:crypto";
-import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 const GATEWAY_URL = "ws://127.0.0.1:18789";
 const MAX_BACKOFF_MS = 30000;
@@ -22,15 +24,15 @@ interface PendingRequest {
 
 function readGatewayToken(): string {
   try {
-    const result = execSync("/opt/homebrew/bin/openclaw config get gateway.auth.token", {
-      encoding: "utf-8",
-      timeout: 10000,
-      env: { ...process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:/usr/bin:${process.env.PATH || ""}` },
-    }).trim();
-    if (!result) throw new Error("empty token");
-    return result;
-  } catch {
-    throw new Error("Failed to read gateway auth token — is OpenClaw configured?");
+    const configPath = join(homedir(), ".openclaw", "openclaw.json");
+    const config = JSON.parse(readFileSync(configPath, "utf-8"));
+    const token = config?.gateway?.auth?.token;
+    if (!token || token === "__OPENCLAW_REDACTED__") {
+      throw new Error("token missing or redacted");
+    }
+    return token;
+  } catch (err: any) {
+    throw new Error(`Failed to read gateway auth token from ~/.openclaw/openclaw.json: ${err.message}`);
   }
 }
 
