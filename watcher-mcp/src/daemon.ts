@@ -280,9 +280,9 @@ function sendToZidane(message: string): void {
   execFile("/opt/homebrew/bin/openclaw", args, {
     encoding: "utf-8",
     timeout: 70000,
-  }, (err: any, _stdout: string, _stderr: string) => {
+  }, (err: any, stdout: string, stderr: string) => {
     if (err) {
-      log("error", "Failed to send to OpenClaw", { error: err.message?.slice(0, 200) });
+      log("error", "Failed to send to OpenClaw", { error: err.message?.slice(0, 200), stderr: stderr?.slice(0, 200), stdout: stdout?.slice(0, 200) });
     } else {
       log("openclaw", `Sent to Zidane: "${message}"`);
     }
