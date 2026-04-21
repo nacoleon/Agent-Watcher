@@ -491,11 +491,18 @@ Add the Watcher MCP server to your OpenClaw MCP configuration:
     "watcher": {
       "command": "node",
       "args": ["/absolute/path/to/watcher-mcp/dist/index.js"],
-      "transportType": "stdio"
+      "transportType": "stdio",
+      "env": {
+        "WATCHER_URL": "http://YOUR_WATCHER_IP"
+      }
     }
   }
 }
 ```
+
+The `WATCHER_URL` environment variable tells both the MCP server and daemon where to find your Watcher. It defaults to `http://10.0.0.40` if not set.
+
+> **Static IP recommended:** Assign a static IP to your Watcher in your router's DHCP settings (using the Watcher's MAC address). This prevents the IP from changing after a power cycle, which would break the MCP/daemon connection. Look for "DHCP reservations" or "static leases" in your router's admin page.
 
 The MCP server is spawned on-demand by the OpenClaw gateway. It's fully stateless — no timers, no pollers. Multiple instances are safe (they all talk to the same daemon via localhost:8378).
 

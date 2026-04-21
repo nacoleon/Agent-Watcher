@@ -143,17 +143,22 @@ Add the Watcher MCP server to your OpenClaw configuration. The exact config loca
     "watcher": {
       "command": "node",
       "args": ["/absolute/path/to/watcher-mcp/dist/index.js"],
-      "transportType": "stdio"
+      "transportType": "stdio",
+      "env": {
+        "WATCHER_URL": "http://YOUR_WATCHER_IP"
+      }
     }
   }
 }
 ```
 
-**Important:** Update the `WATCHER_URL` in `watcher-mcp/src/config.ts` if your Watcher isn't at `10.0.0.40`:
-```typescript
-export const WATCHER_URL = "http://YOUR_WATCHER_IP";
+**Important:** The MCP server and daemon default to `http://10.0.0.40`. Set the `WATCHER_URL` environment variable to your Watcher's IP:
+
+```bash
+export WATCHER_URL="http://YOUR_WATCHER_IP"
 ```
-Then rebuild: `npm run build`.
+
+> **Tip:** Assign a static IP to your Watcher in your router's DHCP settings (using the Watcher's MAC address). This prevents the IP from changing after a reboot, which would break the MCP connection. Check your router's admin page for "DHCP reservations" or "static leases."
 
 ## Step 9: Start the Daemon
 
@@ -161,11 +166,11 @@ The daemon runs 24/7 in the background, polling the Watcher for voice audio, pre
 
 ```bash
 # Start it manually first to verify it works:
-node watcher-mcp/dist/daemon.js
+WATCHER_URL="http://YOUR_WATCHER_IP" node watcher-mcp/dist/daemon.js
 
 # You should see:
 # [system] Watcher daemon started
-# [system] Polling http://10.0.0.40 every 5000ms
+# [system] Polling http://YOUR_WATCHER_IP every 5000ms
 # [poll] alive — uptime=...
 ```
 
@@ -191,6 +196,11 @@ cat > ~/Library/LaunchAgents/ai.openclaw.watcher-daemon.plist << 'EOF'
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>WATCHER_URL</key>
+        <string>http://YOUR_WATCHER_IP</string>
+    </dict>
     <key>StandardOutPath</key>
     <string>/Users/YOU/.openclaw/logs/watcher-daemon.log</string>
     <key>StandardErrorPath</key>

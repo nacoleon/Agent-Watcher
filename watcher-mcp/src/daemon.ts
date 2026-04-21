@@ -21,12 +21,9 @@ import { tmpdir, homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, execSync } from "node:child_process";
+import { WATCHER_URL, POLL_INTERVAL_MS, DEBOUNCE_COUNT, WHISPER_MODEL } from "./config.js";
 
 // --- Config ---
-const WATCHER_URL = "http://10.0.0.40";
-const POLL_INTERVAL_MS = 5000;
-const DEBOUNCE_COUNT = 2;
-const WHISPER_MODEL = "base.en";
 const DAEMON_API_PORT = 8378;
 
 // --- Paths ---
