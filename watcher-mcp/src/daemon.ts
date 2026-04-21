@@ -273,16 +273,22 @@ function transcribe(wavPath: string): string {
 }
 
 // --- Send to OpenClaw ---
+// MUST be async — execSync blocks the event loop and prevents the daemon
+// HTTP server from responding to /voice-context queries from MCP tools.
 function sendToZidane(message: string): void {
-  try {
-    execSync(
-      `openclaw agent --agent main -m ${JSON.stringify(message)} --deliver --timeout 60`,
-      { encoding: "utf-8", timeout: 70000, stdio: ["pipe", "pipe", "pipe"] }
-    );
-    log("openclaw", `Sent to Zidane: "${message}"`);
-  } catch (err: any) {
-    log("error", "Failed to send to OpenClaw", { error: err.message?.slice(0, 200) });
-  }
+  const { execFile } = require("node:child_process");
+  const args = ["agent", "--agent", "main", "-m", message, "--deliver", "--timeout", "60"];
+  const child = execFile("openclaw", args, {
+    encoding: "utf-8",
+    timeout: 70000,
+    stdio: ["pipe", "pipe", "pipe"],
+  }, (err: any, _stdout: string, _stderr: string) => {
+    if (err) {
+      log("error", "Failed to send to OpenClaw", { error: err.message?.slice(0, 200) });
+    } else {
+      log("openclaw", `Sent to Zidane: "${message}"`);
+    }
+  });
 }
 
 // --- Main poller ---
