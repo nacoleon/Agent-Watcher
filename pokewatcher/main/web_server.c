@@ -28,6 +28,7 @@ static int s_heartbeat_log_count = 0;
 static volatile bool s_playing = false;
 static char s_voice_name[64] = "en_US-bryce-medium";
 static int s_speaker_volume = 90;
+static char s_response_mode[16] = "both";
 
 static void load_voice_config(void)
 {
@@ -36,6 +37,8 @@ static void load_voice_config(void)
         size_t len = sizeof(s_voice_name);
         nvs_get_str(nvs, "voice", s_voice_name, &len);
         nvs_get_i32(nvs, "volume", (int32_t *)&s_speaker_volume);
+        size_t rm_len = sizeof(s_response_mode);
+        nvs_get_str(nvs, "resp_mode", s_response_mode, &rm_len);
         nvs_close(nvs);
     }
 }
@@ -46,6 +49,7 @@ static void save_voice_config(void)
     if (nvs_open("pokewatcher", NVS_READWRITE, &nvs) == ESP_OK) {
         nvs_set_str(nvs, "voice", s_voice_name);
         nvs_set_i32(nvs, "volume", s_speaker_volume);
+        nvs_set_str(nvs, "resp_mode", s_response_mode);
         nvs_commit(nvs);
         nvs_close(nvs);
     }
@@ -145,6 +149,7 @@ static esp_err_t handle_api_status(httpd_req_t *req)
     // Voice config
     cJSON_AddStringToObject(root, "voice", s_voice_name);
     cJSON_AddNumberToObject(root, "speaker_volume", s_speaker_volume);
+    cJSON_AddStringToObject(root, "response_mode", s_response_mode);
 
     cJSON_AddBoolToObject(root, "audio_ready", pw_voice_audio_ready());
 
@@ -458,6 +463,7 @@ static esp_err_t handle_api_voice_get(httpd_req_t *req)
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "voice", s_voice_name);
     cJSON_AddNumberToObject(root, "volume", s_speaker_volume);
+    cJSON_AddStringToObject(root, "response_mode", s_response_mode);
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     httpd_resp_set_type(req, "application/json");
@@ -494,10 +500,19 @@ static esp_err_t handle_api_voice_put(httpd_req_t *req)
         if (s_speaker_volume > 95) s_speaker_volume = 95;
     }
 
+    cJSON *resp_mode = cJSON_GetObjectItem(root, "response_mode");
+    if (resp_mode && cJSON_IsString(resp_mode)) {
+        const char *rm = resp_mode->valuestring;
+        if (strcmp(rm, "both") == 0 || strcmp(rm, "voice_only") == 0 || strcmp(rm, "text_only") == 0) {
+            strncpy(s_response_mode, rm, sizeof(s_response_mode) - 1);
+            s_response_mode[sizeof(s_response_mode) - 1] = '\0';
+        }
+    }
+
     save_voice_config();
     cJSON_Delete(root);
 
-    ESP_LOGI(TAG, "Voice config updated: voice=%s volume=%d", s_voice_name, s_speaker_volume);
+    ESP_LOGI(TAG, "Voice config updated: voice=%s volume=%d response_mode=%s", s_voice_name, s_speaker_volume, s_response_mode);
     return handle_api_voice_get(req);
 }
 
