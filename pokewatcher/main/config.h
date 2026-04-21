@@ -55,9 +55,6 @@
 #include "config.local.h"
 #endif
 
-// LLM (kept for potential future use)
-#define PW_LLM_MAX_RESPONSE_LEN   512
-
 // Voice input (push-to-talk)
 #define PW_VOICE_RECORD_MS     90000          // 90 seconds recording (PSRAM max)
 #define PW_VOICE_SAMPLE_RATE   16000
