@@ -369,3 +369,83 @@ Get current voice configuration.
 Set voice model and volume (persisted to NVS flash).
 
 **Body:** `{"voice": "en_US-bryce-medium", "volume": 90}`
+
+## MCP Server
+
+The MCP server (`watcher-mcp/src/index.ts`) is a stateless stdio server spawned on-demand by OpenClaw. Version 1.4.0.
+
+### Tools
+
+| Tool | Parameters | Description |
+|---|---|---|
+| `display_message` | `text` (string, max 1000), `state` (enum, default "reporting"), `level` (enum, default "info") | Show dialog + set state. Messages queue if one is already showing. |
+| `set_state` | `state` (enum) | Change visual state without showing a message. |
+| `get_status` | — | Read live device state (agent_state, person_present, uptime, etc.) |
+| `get_queue` | — | Check message queue: currently showing, pending messages, count. |
+| `reboot` | — | Hardware reboot (power cycle LCD and AI chip). |
+| `heartbeat` | — | Send alive signal. Call every hour. 1.5hr timeout → "down" state. |
+| `speak` | `text` (string), `voice` (string, optional) | Text-to-speech via Piper. Streams PCM to Watcher speaker. |
+
+**Valid states for `display_message` and `set_state`:**
+`idle`, `working`, `waiting`, `alert`, `greeting`, `sleeping`, `reporting`, `down`
+
+### Resources
+
+| Resource URI | Description |
+|---|---|
+| `watcher://status` | JSON snapshot of live device state |
+
+## Watcher Daemon
+
+The daemon (`watcher-mcp/src/daemon.ts`) runs 24/7 as a macOS LaunchAgent. It's the stateful counterpart to the stateless MCP servers.
+
+### What It Does
+
+Polls the Watcher every 5 seconds and handles four concerns:
+
+1. **Voice audio pickup** — detects `audio_ready`, fetches WAV, transcribes with whisper.cpp, sends to OpenClaw
+2. **Presence change detection** — tracks `person_present` with 2-poll debounce, sends `person_arrived`/`person_left`
+3. **Message dismiss detection** — compares `dismiss_count` to trigger next queued message
+4. **Reboot recovery** — detects uptime drop, re-sends the message that was showing
+
+### Message Queue
+
+- Owned by the daemon (not MCP server) so messages survive MCP process restarts
+- **Max 10 messages**, FIFO order
+- Each message pairs text + level + optional state
+- State is applied when the message reaches the screen (not when queued)
+- MCP servers enqueue via daemon HTTP API on `localhost:8378`
+
+**Daemon API:**
+| Method | Path | Body | Response |
+|---|---|---|---|
+| `POST` | `/queue` | `{"text": "...", "level": "info", "state": "reporting"}` | `{"sent": true, "queued": false, "pending": 0}` |
+| `GET` | `/queue` | — | `{"currently_showing": true, "pending": [...], "count": 2}` |
+
+### Voice Pipeline
+
+```
+Knob double-click → 10s recording (16kHz mono) → PSRAM
+    ↓
+Daemon polls /api/status → audio_ready: true
+    ↓
+GET /api/audio → WAV file → DELETE /api/audio
+    ↓
+whisper.cpp transcribe (base.en, ~3s)
+    ↓
+openclaw agent --agent main -m "[Voice from Watcher] hello"
+```
+
+### Presence Notifications
+
+```
+Himax Person Detection → person_present: true/false
+    ↓
+Daemon polls /api/status every 5s
+    ↓
+2-poll debounce (10s) to filter noise
+    ↓
+openclaw agent --agent main -m "[Watcher event] person_arrived"
+```
+
+**Logs:** `~/.openclaw/watcher-daemon-logs/daemon-YYYY-MM-DD.log`
