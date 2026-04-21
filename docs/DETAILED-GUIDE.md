@@ -300,3 +300,72 @@ The dashboard serves mock endpoints matching the firmware's REST API, so you can
 | `/sprites/zidane` | GET | Returns sprite sheet PNG |
 | `/frames/zidane` | GET | Returns `frames.json` animation definitions |
 | `/backgrounds` | GET | Returns background composite PNG |
+
+## REST API Reference
+
+All endpoints are served by the Watcher's built-in web server on port 80.
+
+### `GET /api/status`
+Returns full device state.
+
+**Response:**
+```json
+{
+  "agent_state": "idle",
+  "person_present": true,
+  "uptime_seconds": 3600,
+  "wifi_rssi": -45,
+  "dialog_visible": false,
+  "dismiss_count": 12,
+  "audio_ready": false,
+  "heartbeat_log": [...],
+  "presence_log": [...],
+  "gesture_log": [...]
+}
+```
+
+### `PUT /api/agent-state`
+Change Zidane's visual state.
+
+**Body:** `{"state": "greeting"}`
+**Valid states:** `idle`, `working`, `waiting`, `alert`, `greeting`, `sleeping`, `reporting`, `down`
+
+### `POST /api/message`
+Display a dialog message.
+
+**Body:** `{"text": "Hello!", "level": "info"}`
+**Levels:** `info`, `warning`, `alert`
+**Max:** 1000 characters, paginated at ~95 chars/page
+
+### `POST /api/heartbeat`
+OpenClaw heartbeat signal. Resets the 1.5-hour timeout.
+
+### `POST /api/reboot`
+Hardware reboot — power cycles LCD and AI chip before ESP32 restart.
+
+### `PUT /api/background`
+Set the background tile index.
+
+**Body:** `{"index": 5}`
+
+### `POST /api/audio/play`
+Play PCM audio through the speaker.
+
+**Content-Type:** `application/octet-stream`
+**Body:** Raw 16kHz 16-bit mono PCM data
+
+### `GET /api/audio`
+Fetch recorded voice audio (WAV format). Only available when `audio_ready` is true.
+
+### `DELETE /api/audio`
+Clear the recorded audio buffer.
+
+### `GET /api/voice`
+Get current voice configuration.
+
+**Response:** `{"voice": "en_US-bryce-medium", "volume": 90}`
+
+### `PUT /api/voice`
+Set voice model and volume (persisted to NVS flash).
+
+**Body:** `{"voice": "en_US-bryce-medium", "volume": 90}`
