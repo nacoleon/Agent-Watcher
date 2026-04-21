@@ -12,7 +12,7 @@ Turn a [SenseCap Watcher](https://www.seeedstudio.com/SenseCAP-Watcher-W1-p-5979
 - **FF9 dialog system** — Messages display in a paginated Final Fantasy IX-style dialog box
 - **Background rotation** — 34 curated FFRK backgrounds rotate every 5 minutes with strip-wipe transitions
 - **Always connected** — Heartbeat system with auto-recovery if the agent goes down
-- **Web UI** — Built-in dashboard at the Watcher's IP for manual control and monitoring
+- **Web UI** — Built-in dashboard at the Watcher's IP with live status, state controls, message input, background cycling, AI model switching, heartbeat monitor, gesture/presence event logs, and voice configuration (model + volume)
 
 ## Architecture
 

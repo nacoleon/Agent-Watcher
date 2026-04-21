@@ -75,7 +75,14 @@ You should see Zidane appear on the 412×412 round LCD, walking to the idle posi
 
 ## Step 5: Verify Watcher is Online
 
-Open a browser to `http://<WATCHER_IP>` (e.g., `http://10.0.0.40`). You should see the web UI with state buttons, message input, and logs.
+Open a browser to `http://<WATCHER_IP>` (e.g., `http://10.0.0.40`). You should see the Watcher's built-in web dashboard with:
+
+- Live status (state, person detection, uptime, WiFi signal)
+- State control buttons (click to change Zidane's animation)
+- Message input (type and send dialog messages)
+- Background controls (cycle tiles, toggle auto-rotation)
+- Heartbeat monitor, AI model selector, gesture/presence logs
+- Voice config (voice model dropdown + volume slider)
 
 Or from terminal:
 ```bash

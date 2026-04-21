@@ -228,14 +228,36 @@ The Himax WE2 is a separate AI chip connected via SPI2 with onboard ML models:
 
 ### Web UI
 
-Built-in web interface at `http://<WATCHER_IP>` (default: `http://10.0.0.40`):
+Built-in web interface served by the Watcher at `http://<WATCHER_IP>` (default: `http://10.0.0.40`). Mobile-friendly, auto-polls every 5 seconds.
 
-- **State buttons** — click to change Zidane's state
-- **Message input** — send text to the dialog system
-- **Background controls** — select background tile
-- **AI model toggle** — switch between Person/Pet/Gesture detection
-- **Logs panel** — heartbeat log, presence log, gesture log
-- **Voice config** — current voice and volume settings
+#### Main Dashboard (`/`)
+
+| Section | What it shows |
+|---|---|
+| **Status card** | Current agent state (color-coded badge), person present/away, uptime, WiFi RSSI (dBm), last message |
+| **State buttons** | All 9 states — click to change Zidane's animation instantly. Active state is highlighted. |
+| **Message input** | Text field (max 1000 chars) with character counter. Press Enter or Send to display on the Watcher. |
+| **Background controls** | Prev/Next buttons to cycle through the 34 curated tiles, direct tile # input, and a Rotate ON/OFF toggle for auto-rotation |
+| **Heartbeat monitor** | Time since last heartbeat, color-coded (green = recent, red = >90min). Full heartbeat log with timestamps. |
+| **AI model selector** | Three buttons: Person / Pet / Gesture. Active model highlighted. Switches the Himax camera model in real-time. |
+| **AI event log** | For Person/Pet mode: arrival/departure events with timestamps. For Gesture mode: detected gestures with confidence scores and bounding box sizes. Expandable to show full 20-entry history. |
+| **Voice config** | Voice model dropdown (11 Piper voices: Amy, Bryce, Danny, Joe, John, Kristin, Alan, Alba, Jenny, etc.) and volume slider (0-95). Changes are sent to the Watcher and persisted to NVS. |
+| **Reboot button** | Confirmation dialog, then hardware reboot. Page shows "Rebooting..." message. |
+
+#### Roster Page (`/roster`) — Legacy
+
+Character roster management (from the earlier multi-character system):
+- View active and available characters from the SD card
+- Animated sprite thumbnails using walk cycle
+- Add/remove/select characters
+
+#### Settings Page (`/settings`) — Legacy
+
+Configuration panel (from the earlier standalone LLM integration):
+- LLM endpoint, API key, and model configuration
+- Mood timer settings (curious/lonely timeout, excited/overjoyed duration)
+
+> **Note:** The Roster and Settings pages are legacy features from before the OpenClaw integration. The main dashboard is the primary interface.
 
 ## Sprite & Background Planning Dashboard
 
