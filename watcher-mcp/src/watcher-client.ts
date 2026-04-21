@@ -10,6 +10,7 @@ export interface WatcherStatus {
   dialog_visible: boolean;
   dismiss_count: number;
   audio_ready?: boolean;
+  response_mode?: string;
 }
 
 function request(method: string, path: string, body?: object): Promise<any> {
@@ -101,6 +102,7 @@ export async function clearAudio(): Promise<any> {
 export async function getVoiceConfig(): Promise<{
   voice: string;
   volume: number;
+  response_mode?: string;
 }> {
   return request("GET", "/api/voice");
 }
