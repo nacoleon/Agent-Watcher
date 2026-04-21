@@ -154,7 +154,7 @@ export class OpenClawClient {
       params: {
         minProtocol: 3,
         maxProtocol: 3,
-        client: { id: "watcher-daemon", version: "1.0", mode: "backend" },
+        client: { id: "gateway-client", version: "1.0", mode: "backend", platform: process.platform },
         auth: { token: this.token },
         role: "operator",
         scopes: ["operator.write"],
