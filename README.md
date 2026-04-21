@@ -12,7 +12,7 @@ Turn a [SenseCap Watcher](https://www.seeedstudio.com/SenseCAP-Watcher-W1-p-5979
 - **FF9 dialog system** — Messages display in a paginated Final Fantasy IX-style dialog box
 - **Background rotation** — 34 curated FFRK backgrounds rotate every 5 minutes with strip-wipe transitions
 - **Always connected** — Heartbeat system with auto-recovery if the agent goes down
-- **Web UI** — Built-in dashboard at the Watcher's IP with live status, state controls, message input, background cycling, AI model switching, heartbeat monitor, gesture/presence event logs, and voice configuration (model + volume)
+- **Web UI** — Built-in dashboard at the Watcher's IP with live status, state controls, message input, background cycling, AI model switching, heartbeat monitor, gesture/presence event logs, and voice configuration (model + volume + reply mode)
 
 ## Architecture
 
@@ -44,64 +44,92 @@ Turn a [SenseCap Watcher](https://www.seeedstudio.com/SenseCAP-Watcher-W1-p-5979
 └─────────────────────────────────────────────────┘
 ```
 
-| Component | Location | Role |
-|---|---|---|
-| **Firmware** | `pokewatcher/` | ESP32-S3 firmware — display, camera AI, web server, voice recording |
-| **MCP Server** | `watcher-mcp/` | Stateless stdio bridge — 7 tools for OpenClaw to control the Watcher |
-| **Daemon** | `watcher-mcp/src/daemon.ts` | 24/7 background poller — voice transcription, presence detection, message queue |
-| **Dashboard** | `zidane-dashboard/` | Browser-based sprite & background planning tool (localhost:8091) |
+## Repository Structure
+
+```
+pokewatcher/              ESP32-S3 firmware (C, ESP-IDF 5.2.1)
+├── main/                   Source files, web UI, config
+├── partitions.csv          Flash partition layout
+└── sdkconfig.defaults      Build configuration
+
+watcher-mcp/              MCP server + daemon (TypeScript)
+├── src/index.ts            MCP server entry point (stdio, stateless)
+├── src/daemon.ts           24/7 background poller + message queue
+├── src/tools.ts            7 MCP tools with auto-pairing logic
+├── src/openclaw-client.ts  Persistent WebSocket to OpenClaw gateway
+└── src/tts.ts              Piper TTS integration
+
+zidane-dashboard/         Sprite & background planning tool
+├── server.py               Python dev server (localhost:8091)
+├── index.html              Live animation preview
+├── sprites.html            Frame-by-frame sprite catalog
+└── backgrounds.html        Background tile picker
+
+sdcard_prep/              SD card assets
+├── characters/zidane/      Sprite sheet + frame definitions
+└── himax/                  Camera firmware (one-time recovery)
+
+docs/
+├── QUICK-START.md          Zero-to-running setup guide
+├── DETAILED-GUIDE.md       Complete feature reference
+└── knowledgebase/          Internal dev notes (SPI debugging, pin maps, etc.)
+```
 
 ## Quick Start
 
-See the full [Quick Start Guide](docs/QUICK-START.md) for step-by-step setup. The short version:
+See the full [Quick Start Guide](docs/QUICK-START.md) for the complete 12-step setup. The short version:
 
 ```bash
-# 1. Prep SD card with sprites + Himax firmware from sdcard_prep/
-# 2. Set WiFi credentials
+# 1. Install ESP-IDF 5.2.1, Node.js 20+, Piper TTS, Python 3
+# 2. Clone this repo + Seeed Studio SDK
+git clone https://github.com/nacoleon/Agent-Watcher.git
+git clone https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware.git /tmp/SenseCAP-Watcher-Firmware
+
+# 3. Prep SD card (FAT32) with sprites from sdcard_prep/characters/zidane/
+# 4. Set WiFi credentials
 cp pokewatcher/main/config.local.h.example pokewatcher/main/config.local.h
 # Edit config.local.h with your SSID and password
-# 3. Clone the SDK
-git clone https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware.git /tmp/SenseCAP-Watcher-Firmware
-# 4. Build & flash firmware (must build from /tmp — space in path breaks linker)
-cp -r pokewatcher /tmp/pokewatcher-build
-cd /tmp/pokewatcher-build
-idf.py build
-idf.py -p /dev/cu.usbmodemXXXXX app-flash  # find your port: ls /dev/cu.usb*
 
-# 5. Build MCP server + download Whisper model
+# 5. Back up factory partition (first-time only!)
+# 6. Build & flash firmware
+source ~/esp/esp-idf/export.sh
+cp -r pokewatcher /tmp/pokewatcher-build && cd /tmp/pokewatcher-build
+idf.py set-target esp32s3 && idf.py build
+idf.py -p /dev/cu.usbmodemXXXXX flash    # first time: 'flash'
+                                           # future:     'app-flash'
+
+# 7. Build MCP server + download Whisper model
 cd watcher-mcp && npm install && npm run build
 
-# 6. Start daemon
-node watcher-mcp/dist/daemon.js
-
-# 6. Add MCP server to OpenClaw config
+# 8. Start daemon, configure MCP in OpenClaw
 ```
 
 ## MCP Tools
 
 | Tool | Description |
 |---|---|
-| `display_message` | Show dialog + set state. Messages queue automatically. |
+| `display_message` | Show dialog + set state. Auto-speaks via TTS on voice replies (if reply mode = both). |
 | `set_state` | Change visual state (idle, working, alert, greeting, sleeping, reporting, down) |
 | `get_status` | Read device state, presence, uptime, queue depth |
 | `get_queue` | Check pending messages |
-| `speak` | Text-to-speech via Piper TTS through the Watcher's speaker |
+| `speak` | Text-to-speech via Piper TTS. Auto-displays text on voice replies (if reply mode = both). |
 | `heartbeat` | Keep-alive signal (1.5hr timeout → "down" state) |
 | `reboot` | Hardware reboot |
 
 ## Documentation
 
-- **[Quick Start Guide](docs/QUICK-START.md)** — Get running in ~15 minutes
+- **[Quick Start Guide](docs/QUICK-START.md)** — 12-step zero-to-running setup (brand-new device + fresh Mac)
 - **[Detailed Guide](docs/DETAILED-GUIDE.md)** — Complete reference: all features, REST API, MCP tools, daemon, troubleshooting
 
 ## Requirements
 
-- SenseCap Watcher device
+- SenseCap Watcher device + USB-C cable + microSD card (FAT32)
 - Mac with Homebrew
-- ESP-IDF 5.2.1
+- ESP-IDF 5.2.1 (with ESP32-S3 target)
 - Node.js 20+
-- Piper TTS (`pip install piper-tts`)
-- OpenClaw CLI
+- Python 3
+- Piper TTS (`pip3 install piper-tts`)
+- OpenClaw gateway running on `ws://127.0.0.1:18789`
 
 ## License
 
