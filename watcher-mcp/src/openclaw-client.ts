@@ -165,7 +165,7 @@ export class OpenClawClient {
         client: { id: "gateway-client", version: "1.0", mode: "backend", platform: process.platform },
         auth: { token: this.token },
         role: "operator",
-        scopes: ["operator.write"],
+        scopes: ["operator.admin"],
         caps: [],
       },
     };
