@@ -23,17 +23,21 @@ interface PendingRequest {
 }
 
 function readGatewayToken(): string {
-  try {
-    const configPath = join(homedir(), ".openclaw", "openclaw.json");
-    const config = JSON.parse(readFileSync(configPath, "utf-8"));
-    const token = config?.gateway?.auth?.token;
-    if (!token || token === "__OPENCLAW_REDACTED__") {
-      throw new Error("token missing or redacted");
-    }
-    return token;
-  } catch (err: any) {
-    throw new Error(`Failed to read gateway auth token from ~/.openclaw/openclaw.json: ${err.message}`);
+  // The token in openclaw.json is a variable reference (${OPENCLAW_GATEWAY_TOKEN}).
+  // The actual token lives in the gateway's LaunchAgent plist as an env var.
+  // Read it from there, or from our own environment if set.
+  if (process.env.OPENCLAW_GATEWAY_TOKEN) {
+    return process.env.OPENCLAW_GATEWAY_TOKEN;
   }
+
+  try {
+    const plistPath = join(homedir(), "Library", "LaunchAgents", "ai.openclaw.gateway.plist");
+    const plist = readFileSync(plistPath, "utf-8");
+    const match = plist.match(/<key>OPENCLAW_GATEWAY_TOKEN<\/key>\s*<string>([^<]+)<\/string>/);
+    if (match?.[1]) return match[1];
+  } catch {}
+
+  throw new Error("Failed to read gateway auth token — set OPENCLAW_GATEWAY_TOKEN or check gateway plist");
 }
 
 export class OpenClawClient {
