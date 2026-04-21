@@ -277,7 +277,7 @@ function transcribe(wavPath: string): string {
 // HTTP server from responding to /voice-context queries from MCP tools.
 function sendToZidane(message: string): void {
   const args = ["agent", "--agent", "main", "-m", message, "--deliver", "--timeout", "60"];
-  execFile("openclaw", args, {
+  execFile("/opt/homebrew/bin/openclaw", args, {
     encoding: "utf-8",
     timeout: 70000,
   }, (err: any, _stdout: string, _stderr: string) => {
