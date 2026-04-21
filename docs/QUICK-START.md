@@ -31,9 +31,9 @@ The Watcher loads sprites and Himax camera firmware from the SD card at boot.
 # From sdcard_prep/characters/zidane/:
 #   - overworld.raw     (RGB565 sprite sheet)
 #   - frames.json       (animation frame definitions)
-# From sdcard_prep/himax/:
-#   - All .img firmware files
 ```
+
+> **Note:** The Himax AI camera chip comes pre-flashed from the factory. The `sdcard_prep/himax/` directory contains firmware for re-flashing if needed — this is a one-time recovery step, not required for normal setup. See the [Detailed Guide](DETAILED-GUIDE.md#himax-firmware) for instructions.
 
 Insert the SD card into the Watcher's slot and power it on. The firmware loads sprites once at boot, then powers off the SD card to free the SPI bus for the camera.
 

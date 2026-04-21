@@ -664,11 +664,13 @@ Place these files at the SD card root:
 | `overworld.raw` | `sdcard_prep/characters/zidane/` | RGB565 sprite sheet |
 | `frames.json` | `sdcard_prep/characters/zidane/` | Animation frame definitions |
 
-### Himax Firmware
+### Himax Firmware (One-Time Recovery Only)
 
-Place all `.img` files from `sdcard_prep/himax/` at the SD card root. The firmware OTA-flashes the Himax chip if the SD version is newer than what's on-chip.
+The Himax AI camera chip comes pre-flashed from the factory. You do **not** need to put firmware files on the SD card for normal setup.
 
-**Note:** After loading sprites and checking Himax firmware, the firmware powers off the SD card to free the SPI2 MISO line for the camera. The SD card is not accessible after boot.
+If you need to re-flash the Himax chip (e.g., after a failed update or to load a newer firmware version), rename `sdcard_prep/himax/firmware.img` to `himax_firmware_20240816.img` and place it at the SD card root. The boot code checks for this exact filename — if found, it loads the firmware into PSRAM and passes it to `pw_himax_set_firmware()` for OTA flash. If the file isn't on the SD card, the boot simply skips this step.
+
+**Note:** After loading sprites (and optionally checking for Himax firmware), the firmware powers off the SD card to free the SPI2 MISO line for the camera. The SD card is not accessible after boot.
 
 ## Customization
 
