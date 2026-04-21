@@ -22,27 +22,35 @@ interface PendingRequest {
   acceptOnly: boolean;
 }
 
-function readGatewayToken(): string {
-  // The token in openclaw.json is a variable reference (${OPENCLAW_GATEWAY_TOKEN}).
-  // The actual token lives in the gateway's LaunchAgent plist as an env var.
-  // Read it from there, or from our own environment if set.
-  if (process.env.OPENCLAW_GATEWAY_TOKEN) {
-    return process.env.OPENCLAW_GATEWAY_TOKEN;
-  }
+interface GatewayAuth {
+  deviceToken: string;
+  deviceId: string;
+  scopes: string[];
+}
 
+function readGatewayAuth(): GatewayAuth {
   try {
-    const plistPath = join(homedir(), "Library", "LaunchAgents", "ai.openclaw.gateway.plist");
-    const plist = readFileSync(plistPath, "utf-8");
-    const match = plist.match(/<key>OPENCLAW_GATEWAY_TOKEN<\/key>\s*<string>([^<]+)<\/string>/);
-    if (match?.[1]) return match[1];
-  } catch {}
+    const authPath = join(homedir(), ".openclaw", "identity", "device-auth.json");
+    const auth = JSON.parse(readFileSync(authPath, "utf-8"));
+    const operator = auth?.tokens?.operator;
+    if (!operator?.token) throw new Error("no operator token");
 
-  throw new Error("Failed to read gateway auth token — set OPENCLAW_GATEWAY_TOKEN or check gateway plist");
+    const devicePath = join(homedir(), ".openclaw", "identity", "device.json");
+    const device = JSON.parse(readFileSync(devicePath, "utf-8"));
+
+    return {
+      deviceToken: operator.token,
+      deviceId: device.deviceId,
+      scopes: operator.scopes || ["operator.admin"],
+    };
+  } catch (err: any) {
+    throw new Error(`Failed to read device auth from ~/.openclaw/identity/: ${err.message}`);
+  }
 }
 
 export class OpenClawClient {
   private ws: WebSocket | null = null;
-  private token: string;
+  private auth: GatewayAuth;
   private pending = new Map<string, PendingRequest>();
   private connected = false;
   private backoffMs = 1000;
@@ -50,7 +58,7 @@ export class OpenClawClient {
   private log: (category: string, message: string, data?: any) => void;
 
   constructor(logFn?: (category: string, message: string, data?: any) => void) {
-    this.token = readGatewayToken();
+    this.auth = readGatewayAuth();
     this.log = logFn || ((_c, msg) => console.log(`[openclaw-ws] ${msg}`));
   }
 
@@ -163,18 +171,18 @@ export class OpenClawClient {
         minProtocol: 3,
         maxProtocol: 3,
         client: { id: "gateway-client", version: "1.0", mode: "backend", platform: process.platform },
-        auth: { token: this.token },
+        auth: { deviceToken: this.auth.deviceToken },
         role: "operator",
-        scopes: ["operator.admin"],
+        scopes: this.auth.scopes,
         caps: [],
       },
     };
 
     this.pending.set(id, {
-      resolve: () => {
+      resolve: (payload: any) => {
         this.connected = true;
         this.backoffMs = 1000;
-        this.log("openclaw-ws", "Connected to gateway");
+        this.log("openclaw-ws", "Connected to gateway", { scopes: payload?.auth?.scopes, role: payload?.auth?.role });
       },
       reject: (err) => {
         this.log("openclaw-ws", "Auth failed", { error: err.message });
