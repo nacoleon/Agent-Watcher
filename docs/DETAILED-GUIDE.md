@@ -236,3 +236,67 @@ Built-in web interface at `http://<WATCHER_IP>` (default: `http://10.0.0.40`):
 - **AI model toggle** — switch between Person/Pet/Gesture detection
 - **Logs panel** — heartbeat log, presence log, gesture log
 - **Voice config** — current voice and volume settings
+
+## Sprite & Background Planning Dashboard
+
+The **Zidane Dashboard** (`zidane-dashboard/`) is a local browser tool for planning custom sprites and backgrounds before burning them to the SD card. Use it to preview how animations will look on the 412×412 circular display, audit which sprite frames are usable, and curate which background tiles to include.
+
+### Running the Dashboard
+
+```bash
+python3 zidane-dashboard/server.py
+# Opens on http://localhost:8091
+# Optional custom port:
+python3 zidane-dashboard/server.py 9000
+```
+
+No dependencies beyond Python 3. The server serves static HTML/CSS/JS and provides mock API endpoints matching the firmware's REST API — no hardware needed.
+
+### Main Preview (`/`)
+
+Interactive 412×412 circular display preview — see exactly how your character will look on the Watcher:
+
+- **Live sprite animation** — Character rendered at 4× scale (16×24 → 64×96) with walking, facing directions, and mirror support
+- **State control buttons** — Click any of the 8 states to preview their animation and position. Auto-cycles by default; clicking locks to a specific state.
+- **FF9 dialog box** — Preview how messages look in the dialog system (word-wrapped, paginated)
+- **ZZZ overlay** — See the sleeping state's floating text effect
+- **State behavior tuning** — Walk chance, turn chance, speed, and pause duration are visible per-state, matching firmware behavior
+
+Use this to validate that your custom sprite sheet and `frames.json` produce the animations you expect before copying to the SD card.
+
+### Sprite Catalog (`/sprites.html`)
+
+**Essential for planning custom sprites.** Frame-by-frame reference for the sprite sheet:
+
+- **Full sprite sheet** at 4× scale with hover coordinates — identify exactly which pixel regions to use
+- **Frame grid** — Every 16×24 frame labeled by group (front-facing, back-facing, side-facing, combat, attack), showing coordinates, sizes, and which animations reference each frame
+- **"DO NOT USE" markers** — White/transparent ghost frames are flagged so you don't accidentally reference them in your `frames.json`
+- **Animation previews** — Each of the 16 animations with live looping preview, frame count, loop/mirror flags, and per-frame speed settings
+
+When creating a new character, use this page to map out your sprite sheet layout and verify all frame coordinates in `frames.json` are correct.
+
+### Background Catalog (`/backgrounds.html`)
+
+**Curate your background pool** before writing to firmware:
+
+- **6×14 grid** of all 84 background tiles from the source sheet
+- **Click to toggle** enabled/disabled — green border = included, red/faded = excluded
+- **Live counters** showing enabled vs disabled count
+- **Filter buttons** — All / Enabled Only / Disabled Only
+- **Background IDs** listed — use these IDs when updating the firmware's background tile array
+
+The firmware loads a subset of these tiles into PSRAM at boot and rotates through them every 5 minutes. Use this catalog to pick which tiles make the cut.
+
+### Mock API Endpoints
+
+The dashboard serves mock endpoints matching the firmware's REST API, so you can test integrations locally:
+
+| Endpoint | Method | Behavior |
+|---|---|---|
+| `/api/status` | GET | Returns mock state, presence, uptime, RSSI, messages |
+| `/api/timeline` | GET | Returns array of recent mock messages |
+| `/api/agent-state` | PUT | Sets state, locks auto-cycle |
+| `/api/message` | POST | Accepts message text |
+| `/sprites/zidane` | GET | Returns sprite sheet PNG |
+| `/frames/zidane` | GET | Returns `frames.json` animation definitions |
+| `/backgrounds` | GET | Returns background composite PNG |
