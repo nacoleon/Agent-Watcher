@@ -56,6 +56,32 @@ function ok(data: any) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
 }
 
+// --- Voice context + response mode helpers ---
+
+async function getVoiceContext(): Promise<boolean> {
+  try {
+    const result = await daemonRequest("GET", "/voice-context");
+    return result?.active === true;
+  } catch {
+    return false;
+  }
+}
+
+async function clearVoiceContext(): Promise<void> {
+  try {
+    await daemonRequest("DELETE", "/voice-context");
+  } catch {}
+}
+
+async function getResponseMode(): Promise<string> {
+  try {
+    const config = await watcher.getVoiceConfig();
+    return config.response_mode || "both";
+  } catch {
+    return "both";
+  }
+}
+
 export function registerTools(server: McpServer): void {
   server.registerTool(
     "display_message",
@@ -83,8 +109,38 @@ export function registerTools(server: McpServer): void {
     async ({ text, state, level }: { text: string; state: string; level: string }) => {
       log("tool", "display_message", { state, level, text: text.slice(0, 80) });
       try {
-        const result = await daemonRequest("POST", "/queue", { text, level, state });
-        log("tool", "display_message result", result);
+        const isVoiceReply = await getVoiceContext();
+        const responseMode = isVoiceReply ? await getResponseMode() : "text_only";
+
+        // Display on screen unless response_mode is voice_only
+        let result: any = {};
+        if (responseMode !== "voice_only") {
+          result = await daemonRequest("POST", "/queue", { text, level, state });
+          log("tool", "display_message result", result);
+        }
+
+        // Auto-pair: also speak if response_mode requires it
+        if (isVoiceReply && (responseMode === "both" || responseMode === "voice_only")) {
+          log("tool", "display_message auto-pairing with speak", { responseMode });
+          try {
+            let voice: string | undefined;
+            const config = await watcher.getVoiceConfig();
+            voice = config.voice;
+
+            const pcm = await textToSpeech(text, voice);
+            const playResult = await watcher.playAudio(pcm);
+
+            if (playResult?.error === "speaker busy") {
+              await new Promise((r) => setTimeout(r, 1000));
+              await watcher.playAudio(pcm);
+            }
+          } catch (err: any) {
+            log("error", "auto-pair speak failed", { error: err.message });
+          }
+        }
+
+        if (isVoiceReply) await clearVoiceContext();
+
         return ok(result);
       } catch (err: any) {
         log("error", "display_message failed", { error: err.message });
@@ -214,29 +270,53 @@ export function registerTools(server: McpServer): void {
       }
       log("tool", "speak", { voice, text: text.slice(0, 80) });
       try {
+        const isVoiceReply = await getVoiceContext();
+        const responseMode = isVoiceReply ? await getResponseMode() : "voice_only";
+
         if (!voice) {
           const config = await watcher.getVoiceConfig();
           voice = config.voice;
         }
 
-        const pcm = await textToSpeech(text, voice!);
-        log(
-          "tts",
-          `Generated ${pcm.length} bytes of PCM (${(pcm.length / 32000).toFixed(1)}s)`
-        );
+        let durationS = 0;
 
-        const result = await watcher.playAudio(pcm);
+        // Do TTS unless response_mode is text_only
+        if (responseMode !== "text_only") {
+          const pcm = await textToSpeech(text, voice!);
+          durationS = +(pcm.length / 32000).toFixed(1);
+          log("tts", `Generated ${pcm.length} bytes of PCM (${durationS}s)`);
 
-        if (result?.error === "speaker busy") {
-          log("tts", "Speaker busy, retrying in 1s");
-          await new Promise((r) => setTimeout(r, 1000));
-          await watcher.playAudio(pcm);
+          const result = await watcher.playAudio(pcm);
+
+          if (result?.error === "speaker busy") {
+            log("tts", "Speaker busy, retrying in 1s");
+            await new Promise((r) => setTimeout(r, 1000));
+            await watcher.playAudio(pcm);
+          }
         }
+
+        // Auto-pair: also display on screen if response_mode requires it
+        if (isVoiceReply && (responseMode === "both" || responseMode === "text_only")) {
+          log("tool", "speak auto-pairing with display_message", { responseMode });
+          try {
+            await daemonRequest("POST", "/queue", {
+              text,
+              level: "info",
+              state: "reporting",
+            });
+          } catch (err: any) {
+            log("error", "auto-pair display failed", { error: err.message });
+          }
+        }
+
+        if (isVoiceReply) await clearVoiceContext();
 
         return ok({
           spoke: text,
           voice,
-          duration_s: +(pcm.length / 32000).toFixed(1),
+          response_mode: responseMode,
+          auto_paired: isVoiceReply && responseMode !== "voice_only",
+          duration_s: durationS,
         });
       } catch (err: any) {
         log("error", "speak failed", { error: err.message });
