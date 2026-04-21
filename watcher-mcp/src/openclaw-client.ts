@@ -22,11 +22,13 @@ interface PendingRequest {
 
 function readGatewayToken(): string {
   try {
-    return execSync("/opt/homebrew/bin/openclaw config get gateway.auth.token", {
+    const result = execSync("/opt/homebrew/bin/openclaw config get gateway.auth.token", {
       encoding: "utf-8",
-      timeout: 5000,
-      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 10000,
+      env: { ...process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:/usr/bin:${process.env.PATH || ""}` },
     }).trim();
+    if (!result) throw new Error("empty token");
+    return result;
   } catch {
     throw new Error("Failed to read gateway auth token — is OpenClaw configured?");
   }
