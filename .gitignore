@@ -16,6 +16,3 @@ pokewatcher/sdkconfig.old
 SenseCAP-Watcher-Firmware/
 .gstack/
 
-# Bridge build artifacts
-bridge/node_modules/
-bridge/dist/
