@@ -190,12 +190,8 @@ static esp_err_t handle_api_agent_state(httpd_req_t *req)
 
     pw_agent_state_t state = pw_agent_state_from_string(state_json->valuestring);
     pw_agent_state_set(state);
+    pw_renderer_set_state(state);  // trigger animation change in render loop
     cJSON_Delete(root);
-
-    // Don't wake display for sleep-related states
-    if (state != PW_STATE_SLEEPING && state != PW_STATE_DOWN) {
-        pw_renderer_wake_display();
-    }
 
     cJSON *resp = cJSON_CreateObject();
     cJSON_AddBoolToObject(resp, "ok", true);
