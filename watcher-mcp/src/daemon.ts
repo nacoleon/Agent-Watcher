@@ -26,6 +26,31 @@ import { WATCHER_URL, POLL_INTERVAL_MS, DEBOUNCE_COUNT, WHISPER_MODEL } from "./
 // --- Config ---
 const DAEMON_API_PORT = 8378;
 
+// --- Voice context (signals MCP tools that current response is to voice input) ---
+let voiceContextActive = false;
+let voiceContextTimer: ReturnType<typeof setTimeout> | null = null;
+const VOICE_CONTEXT_TIMEOUT_MS = 60000;
+
+function setVoiceContext(): void {
+  voiceContextActive = true;
+  if (voiceContextTimer) clearTimeout(voiceContextTimer);
+  voiceContextTimer = setTimeout(() => {
+    voiceContextActive = false;
+    voiceContextTimer = null;
+    log("voice-ctx", "Voice context expired (60s timeout)");
+  }, VOICE_CONTEXT_TIMEOUT_MS);
+  log("voice-ctx", "Voice context activated");
+}
+
+function clearVoiceContext(): void {
+  voiceContextActive = false;
+  if (voiceContextTimer) {
+    clearTimeout(voiceContextTimer);
+    voiceContextTimer = null;
+  }
+  log("voice-ctx", "Voice context cleared");
+}
+
 // --- Paths ---
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WHISPER_CPP_DIR = join(__dirname, "..", "node_modules", "whisper-node", "lib", "whisper.cpp");
@@ -306,6 +331,7 @@ async function poll(): Promise<void> {
             log("audio", `Transcribed: "${text}"`);
 
             if (text) {
+              setVoiceContext();
               sendToZidane(`[Voice from Watcher] ${text}`);
             }
           } finally {
@@ -384,6 +410,13 @@ const apiServer = http.createServer(async (req, res) => {
     } else if (req.method === "GET" && req.url === "/queue") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(getQueueState()));
+    } else if (req.method === "GET" && req.url === "/voice-context") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ active: voiceContextActive }));
+    } else if (req.method === "DELETE" && req.url === "/voice-context") {
+      clearVoiceContext();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
     } else {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "not found" }));
