@@ -1,0 +1,8 @@
+// Copy this file to config.local.h and fill in your values
+// config.local.h is gitignored and will never be committed
+
+#undef PW_WIFI_SSID_DEFAULT
+#undef PW_WIFI_PASSWORD_DEFAULT
+
+#define PW_WIFI_SSID_DEFAULT       "YourNetworkName"
+#define PW_WIFI_PASSWORD_DEFAULT   "YourPassword"

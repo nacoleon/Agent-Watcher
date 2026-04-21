@@ -46,8 +46,14 @@
 #define PW_SLEEP_AFTER_STATE_MS       15000  // display off 15s after sleeping state is set
 
 // WiFi defaults (NVS overrides at runtime)
+// To set your real credentials, copy config.local.h.example to config.local.h
 #define PW_WIFI_SSID_DEFAULT       "YOUR_WIFI_SSID"
 #define PW_WIFI_PASSWORD_DEFAULT   "YOUR_WIFI_PASSWORD"
+
+// Local overrides (gitignored) — redefines WiFi credentials etc.
+#if __has_include("config.local.h")
+#include "config.local.h"
+#endif
 
 // LLM (kept for potential future use)
 #define PW_LLM_MAX_RESPONSE_LEN   512

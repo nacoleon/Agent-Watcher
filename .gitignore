@@ -1,6 +1,9 @@
 .superpowers/
 .DS_Store
 
+# Local config with real WiFi credentials (never commit)
+pokewatcher/main/config.local.h
+
 # ESP-IDF build artifacts
 pokewatcher/build/
 pokewatcher/.cache/

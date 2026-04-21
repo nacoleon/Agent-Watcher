@@ -57,7 +57,9 @@ See the full [Quick Start Guide](docs/QUICK-START.md) for step-by-step setup. Th
 
 ```bash
 # 1. Prep SD card with sprites + Himax firmware from sdcard_prep/
-# 2. Set WiFi in pokewatcher/main/config.h (PW_WIFI_SSID_DEFAULT / PW_WIFI_PASSWORD_DEFAULT)
+# 2. Set WiFi credentials
+cp pokewatcher/main/config.local.h.example pokewatcher/main/config.local.h
+# Edit config.local.h with your SSID and password
 # 3. Clone the SDK
 git clone https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware.git /tmp/SenseCAP-Watcher-Firmware
 # 4. Build & flash firmware (must build from /tmp — space in path breaks linker)

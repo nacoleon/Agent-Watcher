@@ -523,14 +523,25 @@ Your OpenClaw agent (`main`) should:
 
 ### WiFi Configuration
 
-Edit `pokewatcher/main/config.h` to set your WiFi credentials (around line 49):
+Copy the example and fill in your credentials:
+
+```bash
+cp pokewatcher/main/config.local.h.example pokewatcher/main/config.local.h
+```
+
+Edit `pokewatcher/main/config.local.h`:
 
 ```c
+#undef PW_WIFI_SSID_DEFAULT
+#undef PW_WIFI_PASSWORD_DEFAULT
+
 #define PW_WIFI_SSID_DEFAULT       "YourNetworkName"
 #define PW_WIFI_PASSWORD_DEFAULT   "YourPassword"
 ```
 
-These are compiled into the firmware as defaults. The Watcher stores WiFi settings in NVS (non-volatile storage) — once connected, changing `config.h` requires a rebuild + flash. A full flash (`idf.py flash`) erases NVS and re-applies the defaults.
+**How it works:** `config.h` defines placeholder values, then conditionally includes `config.local.h` (via `__has_include`) which overrides them with your real credentials. `config.local.h` is gitignored — your credentials are never committed.
+
+The Watcher stores WiFi settings in NVS (non-volatile storage) — once connected, changing credentials requires a rebuild + flash. A full flash (`idf.py flash`) erases NVS and re-applies the defaults.
 
 After boot, the Watcher prints its IP address to the serial console. Note this IP for MCP configuration.
 

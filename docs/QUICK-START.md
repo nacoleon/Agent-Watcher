@@ -39,14 +39,20 @@ Insert the SD card into the Watcher's slot and power it on. The firmware loads s
 
 ## Step 3: Configure WiFi
 
-Edit `pokewatcher/main/config.h` and find the WiFi defaults (around line 49):
+Copy the example config and fill in your credentials:
+
+```bash
+cp pokewatcher/main/config.local.h.example pokewatcher/main/config.local.h
+```
+
+Edit `pokewatcher/main/config.local.h`:
 
 ```c
 #define PW_WIFI_SSID_DEFAULT       "YourNetworkName"
 #define PW_WIFI_PASSWORD_DEFAULT   "YourPassword"
 ```
 
-Replace with your WiFi credentials. The Watcher gets a DHCP address — note the IP from the serial console after boot (you'll need it for MCP config).
+This file is gitignored so your credentials are never committed. The firmware auto-includes it if it exists. The Watcher gets a DHCP address — note the IP from the serial console after boot (you'll need it for MCP config).
 
 ## Step 4: Get the SDK Components
 
