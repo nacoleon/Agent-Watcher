@@ -103,6 +103,14 @@
             <input id="vol-slider" type="range" min="0" max="95" value="70" onchange="setVoice()" style="flex:1;">
             <span id="vol-val" style="min-width:30px;text-align:right;">70</span>
         </div>
+        <div class="stat">
+            <span class="label">Reply Mode</span>
+            <select id="resp-mode" onchange="setVoice()" style="flex:1;padding:5px;background:#1a1a4e;border:1px solid #2a2a5e;border-radius:6px;color:#e0e0e0;font-family:inherit;font-size:12px;">
+                <option value="both">Both (Voice + Text)</option>
+                <option value="voice_only">Voice Only</option>
+                <option value="text_only">Text Only</option>
+            </select>
+        </div>
     </div>
 
     <button class="reboot" onclick="reboot()">Reboot Watcher</button>
@@ -195,8 +203,9 @@
         async function setVoice() {
             const voice = document.getElementById('voice-select').value;
             const volume = parseInt(document.getElementById('vol-slider').value);
+            const response_mode = document.getElementById('resp-mode').value;
             document.getElementById('vol-val').textContent = volume;
-            await fetch('/api/voice', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({voice, volume}) });
+            await fetch('/api/voice', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({voice, volume, response_mode}) });
         }
         document.getElementById('vol-slider').addEventListener('input', function() {
             document.getElementById('vol-val').textContent = this.value;
@@ -255,6 +264,9 @@
                 if (d.speaker_volume !== undefined) {
                     document.getElementById('vol-slider').value = d.speaker_volume;
                     document.getElementById('vol-val').textContent = d.speaker_volume;
+                }
+                if (d.response_mode) {
+                    document.getElementById('resp-mode').value = d.response_mode;
                 }
 
                 // AI log — presence for person/pet, gestures for gesture model
