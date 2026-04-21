@@ -280,6 +280,20 @@ export function registerTools(server: McpServer): void {
 
         let durationS = 0;
 
+        // Auto-pair: display text BEFORE playing audio so reporting state is visible while speaking
+        if (isVoiceReply && (responseMode === "both" || responseMode === "text_only")) {
+          log("tool", "speak auto-pairing with display_message", { responseMode });
+          try {
+            await daemonRequest("POST", "/queue", {
+              text,
+              level: "info",
+              state: "reporting",
+            });
+          } catch (err: any) {
+            log("error", "auto-pair display failed", { error: err.message });
+          }
+        }
+
         // Do TTS unless response_mode is text_only
         if (responseMode !== "text_only") {
           const pcm = await textToSpeech(text, voice!);
@@ -292,20 +306,6 @@ export function registerTools(server: McpServer): void {
             log("tts", "Speaker busy, retrying in 1s");
             await new Promise((r) => setTimeout(r, 1000));
             await watcher.playAudio(pcm);
-          }
-        }
-
-        // Auto-pair: also display on screen if response_mode requires it
-        if (isVoiceReply && (responseMode === "both" || responseMode === "text_only")) {
-          log("tool", "speak auto-pairing with display_message", { responseMode });
-          try {
-            await daemonRequest("POST", "/queue", {
-              text,
-              level: "info",
-              state: "reporting",
-            });
-          } catch (err: any) {
-            log("error", "auto-pair display failed", { error: err.message });
           }
         }
 
