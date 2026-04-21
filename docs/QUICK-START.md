@@ -13,7 +13,7 @@ Get your SenseCap Watcher running as an OpenClaw AI desk companion in ~15 minute
 | Node.js 20+ | `brew install node` |
 | ESP-IDF 5.2.1 | [ESP-IDF install guide](https://docs.espressif.com/projects/esp-idf/en/v5.2.1/esp32s3/get-started/) |
 | Piper TTS | `pip install piper-tts` |
-| OpenClaw CLI | Must be installed and configured with an agent named `main` |
+| OpenClaw | Gateway running on `ws://127.0.0.1:18789` with device identity configured in `~/.openclaw/identity/` |
 
 ## Step 1: Clone the Repository
 

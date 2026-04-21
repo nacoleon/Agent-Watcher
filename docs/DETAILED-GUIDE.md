@@ -67,7 +67,7 @@ The system has three components:
 | **MCP Server** (`watcher-mcp/src/index.ts`) | Mac (spawned by OpenClaw) | Stateless stdio bridge — 7 tools for OpenClaw to control the Watcher |
 | **Daemon** (`watcher-mcp/src/daemon.ts`) | Mac (LaunchAgent, 24/7) | Polls Watcher every 5s for voice audio, presence changes, message dismissals. Owns the message queue. Sends events to OpenClaw. |
 
-Communication: Mac ↔ Watcher over HTTP (port 80). MCP Server ↔ Daemon over localhost HTTP (port 8378). Daemon → OpenClaw via `openclaw agent` CLI.
+Communication: Mac ↔ Watcher over HTTP (port 80). MCP Server ↔ Daemon over localhost HTTP (port 8378). Daemon → OpenClaw Gateway via persistent WebSocket (`ws://127.0.0.1:18789`) with Ed25519 device identity signing.
 
 ## Hardware
 
@@ -451,12 +451,24 @@ The daemon (`watcher-mcp/src/daemon.ts`) runs 24/7 as a macOS LaunchAgent. It's 
 
 ### What It Does
 
-Polls the Watcher every 5 seconds and handles four concerns:
+Polls the Watcher every 5 seconds and handles five concerns:
 
-1. **Voice audio pickup** — detects `audio_ready`, fetches WAV, transcribes with whisper.cpp, sends to OpenClaw
+1. **Voice audio pickup** — detects `audio_ready`, fetches WAV, transcribes with whisper.cpp, sets voice context, sends to OpenClaw
 2. **Presence change detection** — tracks `person_present` with 2-poll debounce, sends `person_arrived`/`person_left`
 3. **Message dismiss detection** — compares `dismiss_count` to trigger next queued message
 4. **Reboot recovery** — detects uptime drop, re-sends the message that was showing
+5. **Voice context tracking** — manages the voice context flag and exposes it to MCP tools via `/voice-context` endpoints
+
+### OpenClaw Gateway Connection
+
+The daemon maintains a **persistent WebSocket connection** to the OpenClaw gateway at `ws://127.0.0.1:18789`:
+
+- **Ed25519 device identity signing** for authentication (reads keys from `~/.openclaw/identity/`)
+- **Message delivery in <1 second** — returns on "accepted" status, doesn't wait for full agent response
+- **Auto-reconnects** with exponential backoff (up to 30 seconds) on disconnect
+- Replaced the previous `openclaw agent` CLI spawn which took ~40 seconds per message (Node.js startup + WebSocket handshake each time)
+
+Implementation: `watcher-mcp/src/openclaw-client.ts`
 
 ### Message Queue
 
@@ -503,7 +515,7 @@ Daemon polls /api/status every 5s
     ↓
 2-poll debounce (10s) to filter noise
     ↓
-openclaw agent --agent main -m "[Watcher event] person_arrived"
+WebSocket → OpenClaw Gateway → "[Watcher event] person_arrived"
 ```
 
 **Logs:** `~/.openclaw/watcher-daemon-logs/daemon-YYYY-MM-DD.log`
@@ -537,7 +549,7 @@ The MCP server is spawned on-demand by the OpenClaw gateway. It's fully stateles
 
 ### Agent Events
 
-The daemon sends these events to OpenClaw via `openclaw agent --agent main -m "<message>"`:
+The daemon sends these events to OpenClaw via persistent WebSocket connection to the gateway:
 
 | Event | Message Format | Trigger |
 |---|---|---|
@@ -741,7 +753,7 @@ Available Piper voices: any voice from [rhasspy/piper-voices](https://huggingfac
 │  Receives: voice transcriptions, presence events       │
 │  Sends: display_message, speak, set_state, heartbeat   │
 └───────────────┬───────────────────┬───────────────────┘
-                │ MCP (stdio)       │ CLI
+                │ MCP (stdio)       │ WebSocket
                 ▼                   ▼
 ┌───────────────────┐  ┌─────────────────────────────┐
 │   MCP Server      │  │     Watcher Daemon           │

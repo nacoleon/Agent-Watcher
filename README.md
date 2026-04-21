@@ -23,7 +23,7 @@ Turn a [SenseCap Watcher](https://www.seeedstudio.com/SenseCAP-Watcher-W1-p-5979
 │  Receives: voice transcriptions, presence events  │
 │  Sends: messages, state changes, speech, heartbeat│
 └──────────┬────────────────────┬──────────────────┘
-           │ MCP (stdio)        │ CLI
+           │ MCP (stdio)        │ WebSocket
            ▼                    ▼
 ┌──────────────────┐  ┌──────────────────────────┐
 │   MCP Server     │  │    Watcher Daemon         │
