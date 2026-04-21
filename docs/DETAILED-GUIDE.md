@@ -102,7 +102,7 @@ Zidane has 9 visual states, each with a unique sprite animation and screen posit
 | `sleeping` | Eyes closed + ZZZ overlay | Bottom center | Night/idle timeout |
 | `reporting` | Presenting pose | Center | Showing a message |
 | `down` | Fallen/KO | Bottom center | OpenClaw heartbeat timeout |
-| `wakeup` | Standing up | Bottom center | Transitional after sleep |
+| `wakeup` | Standing up | Bottom center | Transitional after sleep (firmware-internal, not settable via API) |
 
 State transitions trigger smooth walk animations — Zidane walks in a straight line from current position to the new state's position before switching to the destination animation.
 
@@ -369,6 +369,13 @@ Get current voice configuration.
 Set voice model and volume (persisted to NVS flash).
 
 **Body:** `{"voice": "en_US-bryce-medium", "volume": 90}`
+
+### `PUT /api/model`
+Switch the Himax camera's AI model.
+
+**Body:** `{"model": 1}`
+**Models:** `1` = Person Detection, `2` = Pet Detection, `3` = Gesture Detection (Rock/Paper/Scissors)
+**Response:** `{"ok": true, "model": 1, "name": "Person Detection"}`
 
 ## MCP Server
 
