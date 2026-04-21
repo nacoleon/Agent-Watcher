@@ -148,3 +148,91 @@ FF9-style dialog box with grainy gray background and speech tail:
 | Double press | Start 10-second voice recording |
 | Long press (6s) | Hardware reboot |
 | Rotate | Scroll dialog pages |
+
+### RGB LED
+
+State-specific LED behavior:
+
+| State/Event | LED Color | Pattern |
+|---|---|---|
+| `alert` | Red | Blinking |
+| `waiting` | Orange | Blinking |
+| `greeting` | Pink | Blinking |
+| `reporting` | Green | Blinking |
+| Voice recording | Blue | Solid |
+| Voice ready | Green | Solid |
+| Gesture confirmed | Purple | Double flash |
+| All others | Off | — |
+
+### Voice Input (Push-to-Talk)
+
+1. **Double-click the knob** → LED turns blue, 10-second recording starts
+2. Audio captured at 16kHz/16-bit mono into PSRAM
+3. LED turns green when recording complete
+4. **Daemon polls** `GET /api/status` every 5s, sees `audio_ready: true`
+5. Daemon fetches audio via `GET /api/audio`, then `DELETE /api/audio` to clear
+6. **whisper.cpp** transcribes the WAV (base.en model, ~2-5 seconds)
+7. Transcribed text sent to OpenClaw: `openclaw agent --agent main -m "[Voice from Watcher] <text>"`
+
+### Speaker Output (TTS)
+
+The `speak` MCP tool converts text to speech and plays it through the Watcher's speaker:
+
+1. OpenClaw calls the `speak` tool with text
+2. **Piper TTS** runs locally on Mac, generates 22050Hz PCM audio
+3. Audio resampled to 16kHz (linear interpolation) for the Watcher's codec
+4. PCM buffer sent to Watcher via `POST /api/audio/play`
+5. Speaker unmutes, plays audio, re-mutes
+
+**Default voice:** `en_US-bryce-medium` at length-scale 0.7, volume 90.
+Voice models auto-download from Hugging Face to `/tmp/piper-voices/` on first use.
+
+### Himax AI Camera
+
+The Himax WE2 is a separate AI chip connected via SPI2 with onboard ML models:
+
+- **SPI clock:** 12 MHz
+- **3 models available:**
+  - Model 1: Person Detection
+  - Model 2: Pet Detection
+  - Model 3: Gesture Detection (Rock/Paper/Scissors)
+- **Auto model switching:** Person detected → switch to Gesture mode. 20 min idle → switch back to Person mode.
+- **OTA firmware:** Himax firmware files on SD card are flashed to the AI chip at boot if newer
+
+**Critical:** `CONFIG_FREERTOS_HZ` must be 1000 (not 100). The Himax SPI protocol requires 2ms delays — at 100Hz tick rate, `vTaskDelay(pdMS_TO_TICKS(2))` rounds to 0, breaking the camera.
+
+### Person Detection & Presence
+
+- Camera runs Person Detection model by default
+- **Presence tracking:** 3-minute timeout — if no person detected for 3 min, `person_present` flips to `false`
+- **Daemon detects changes** with 2-poll debounce (10 seconds) to filter noise
+- Events sent to OpenClaw: `person_arrived` / `person_left`
+- Presence log available in web UI and via `GET /api/status`
+
+### Gesture Recognition
+
+- Activated when a person is detected (auto model switch)
+- **Rock/Paper/Scissors** with 85% confidence threshold
+- **4-frame confirmation** required (must see same gesture 4 consecutive frames)
+- **Rock false-positive filter:** bounding box width must be ≥130px (real fist is 144+, false positives from face/body are smaller)
+- **6-second re-detection cooldown** between confirmed gestures
+- **Purple double LED flash** on confirmed gesture
+- Gesture log: 20-entry circular buffer, visible in web UI
+
+### OpenClaw Heartbeat
+
+- OpenClaw sends heartbeat via `heartbeat` MCP tool (should be called every hour)
+- **1.5-hour timeout:** if no heartbeat received, Watcher enters `down` state (Zidane KO animation)
+- **Auto-recovery:** sending a heartbeat while in `down` state returns to `idle`
+- Heartbeat log visible in web UI
+
+### Web UI
+
+Built-in web interface at `http://<WATCHER_IP>` (default: `http://10.0.0.40`):
+
+- **State buttons** — click to change Zidane's state
+- **Message input** — send text to the dialog system
+- **Background controls** — select background tile
+- **AI model toggle** — switch between Person/Pet/Gesture detection
+- **Logs panel** — heartbeat log, presence log, gesture log
+- **Voice config** — current voice and volume settings
