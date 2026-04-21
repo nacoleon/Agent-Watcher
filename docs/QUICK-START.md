@@ -242,8 +242,11 @@ curl -X POST http://10.0.0.40/api/message \
   -d '{"text": "Hello from Quick Start!", "level": "info"}'
 
 # 3. Test voice: double-click the knob on the Watcher
-#    LED turns blue (recording), then green (ready)
+#    LED turns blue, Zidane shows reporting animation
+#    Speak your message, then single-press knob to stop (or wait up to 90s)
+#    LED turns green (recording done)
 #    Daemon picks up audio, transcribes, sends to OpenClaw
+#    OpenClaw's reply auto-pairs voice + text based on Reply Mode setting
 
 # 4. Test TTS (via MCP speak tool or direct):
 curl -X PUT http://10.0.0.40/api/agent-state \

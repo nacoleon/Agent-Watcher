@@ -6,8 +6,8 @@ Turn a [SenseCap Watcher](https://www.seeedstudio.com/SenseCAP-Watcher-W1-p-5979
 
 - **Animated character** — Zidane (Final Fantasy IX) with 16 sprite animations, smooth walk transitions, and 9 context-aware states (idle, working, alert, greeting, sleeping, etc.)
 - **AI vision** — Himax WE2 camera with person detection, pet detection, and Rock/Paper/Scissors gesture recognition
-- **Voice input** — Double-click the knob to record a 10-second message, transcribed locally via whisper.cpp and sent to your AI agent
-- **Voice output** — Your agent speaks back through the Watcher's speaker using Piper TTS
+- **Voice input** — Double-click the knob to record up to 90 seconds, press again to stop early. Transcribed locally via whisper.cpp and sent to your AI agent.
+- **Voice output** — Your agent speaks back through the Watcher's speaker using Piper TTS. Configurable reply mode: both (voice + text), voice only, or text only.
 - **Presence awareness** — Detects when you arrive or leave, notifies your agent so it can greet you or go to sleep
 - **FF9 dialog system** — Messages display in a paginated Final Fantasy IX-style dialog box
 - **Background rotation** — 34 curated FFRK backgrounds rotate every 5 minutes with strip-wipe transitions

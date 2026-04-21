@@ -144,8 +144,8 @@ FF9-style dialog box with grainy gray background and speech tail:
 
 | Action | Effect |
 |---|---|
-| Short press | Dismiss current dialog / wake display |
-| Double press | Start 10-second voice recording |
+| Short press | Dismiss current dialog / wake display / **stop recording early** |
+| Double press | Start voice recording (up to 90 seconds) |
 | Long press (6s) | Hardware reboot |
 | Rotate | Scroll dialog pages |
 
@@ -166,13 +166,16 @@ State-specific LED behavior:
 
 ### Voice Input (Push-to-Talk)
 
-1. **Double-click the knob** → LED turns blue, 10-second recording starts
-2. Audio captured at 16kHz/16-bit mono into PSRAM
-3. LED turns green when recording complete
-4. **Daemon polls** `GET /api/status` every 5s, sees `audio_ready: true`
-5. Daemon fetches audio via `GET /api/audio`, then `DELETE /api/audio` to clear
-6. **whisper.cpp** transcribes the WAV (base.en model, ~2-5 seconds)
-7. Transcribed text sent to OpenClaw: `openclaw agent --agent main -m "[Voice from Watcher] <text>"`
+1. **Double-click the knob** → LED turns blue, Zidane switches to reporting animation, recording starts
+2. Audio captured at 16kHz/16-bit mono into PSRAM (up to 90 seconds, ~2.88 MB)
+3. **Single press the knob to stop early** — or let it auto-stop at 90 seconds
+4. LED turns green when recording complete, Zidane returns to previous state
+5. **Daemon polls** `GET /api/status` every 5s, sees `audio_ready: true`
+6. Daemon fetches audio via `GET /api/audio`, then `DELETE /api/audio` to clear
+7. **whisper.cpp** transcribes the WAV (base.en model)
+8. Daemon sets a **voice context** flag (120-second timeout) and sends transcription to OpenClaw asynchronously
+
+Minimum audio length is 0.5 seconds — shorter recordings are discarded.
 
 ### Speaker Output (TTS)
 
@@ -186,6 +189,22 @@ The `speak` MCP tool converts text to speech and plays it through the Watcher's 
 
 **Default voice:** `en_US-bryce-medium` at length-scale 0.7, volume 90.
 Voice models auto-download from Hugging Face to `/tmp/piper-voices/` on first use.
+
+### Response Mode & Voice Context
+
+When the Watcher receives voice input, the daemon sets a **voice context** flag that tells MCP tools this is a voice-triggered conversation (not a proactive agent message). Combined with the **response mode** setting, this controls how OpenClaw's replies are delivered:
+
+| Response Mode | `speak` tool does | `display_message` tool does |
+|---|---|---|
+| `both` (default) | TTS audio **+ auto-displays text on LCD** | Shows text on LCD **+ auto-speaks via TTS** |
+| `voice_only` | TTS audio only | Skipped entirely (no text displayed) |
+| `text_only` | Skipped (no TTS) | Shows text on LCD only |
+
+**Key behaviors:**
+- **Only affects voice replies** — proactive messages from OpenClaw (greetings, alerts, etc.) are unaffected
+- **Voice context clears** after the first tool consumes it, preventing double-pairing
+- **120-second timeout** — if OpenClaw doesn't respond within 2 minutes, context expires
+- **NVS-persistent** — response mode survives reboots (set via `PUT /api/voice` or the web UI)
 
 ### Himax AI Camera
 
@@ -241,7 +260,7 @@ Built-in web interface served by the Watcher at `http://<WATCHER_IP>` (default: 
 | **Heartbeat monitor** | Time since last heartbeat, color-coded (green = recent, red = >90min). Full heartbeat log with timestamps. |
 | **AI model selector** | Three buttons: Person / Pet / Gesture. Active model highlighted. Switches the Himax camera model in real-time. |
 | **AI event log** | For Person/Pet mode: arrival/departure events with timestamps. For Gesture mode: detected gestures with confidence scores and bounding box sizes. Expandable to show full 20-entry history. |
-| **Voice config** | Voice model dropdown (11 Piper voices: Amy, Bryce, Danny, Joe, John, Kristin, Alan, Alba, Jenny, etc.) and volume slider (0-95). Changes are sent to the Watcher and persisted to NVS. |
+| **Voice config** | Voice model dropdown (11 Piper voices: Amy, Bryce, Danny, Joe, John, Kristin, Alan, Alba, Jenny, etc.), volume slider (0-95), and **Reply Mode** dropdown (Both / Voice Only / Text Only). All changes persisted to NVS. |
 | **Reboot button** | Confirmation dialog, then hardware reboot. Page shows "Rebooting..." message. |
 
 #### Roster Page (`/roster`) — Legacy
@@ -340,6 +359,7 @@ Returns full device state.
   "dialog_visible": false,
   "dismiss_count": 12,
   "audio_ready": false,
+  "response_mode": "both",
   "heartbeat_log": [...],
   "presence_log": [...],
   "gesture_log": [...]
@@ -385,12 +405,13 @@ Clear the recorded audio buffer.
 ### `GET /api/voice`
 Get current voice configuration.
 
-**Response:** `{"voice": "en_US-bryce-medium", "volume": 90}`
+**Response:** `{"voice": "en_US-bryce-medium", "volume": 90, "response_mode": "both"}`
 
 ### `PUT /api/voice`
-Set voice model and volume (persisted to NVS flash).
+Set voice model, volume, and/or response mode (all persisted to NVS flash).
 
-**Body:** `{"voice": "en_US-bryce-medium", "volume": 90}`
+**Body:** `{"voice": "en_US-bryce-medium", "volume": 90, "response_mode": "both"}`
+**Response modes:** `both` (voice + text), `voice_only`, `text_only`
 
 ### `PUT /api/model`
 Switch the Himax camera's AI model.
@@ -445,24 +466,32 @@ Polls the Watcher every 5 seconds and handles four concerns:
 - State is applied when the message reaches the screen (not when queued)
 - MCP servers enqueue via daemon HTTP API on `localhost:8378`
 
-**Daemon API:**
+**Daemon API (localhost:8378):**
 | Method | Path | Body | Response |
 |---|---|---|---|
 | `POST` | `/queue` | `{"text": "...", "level": "info", "state": "reporting"}` | `{"sent": true, "queued": false, "pending": 0}` |
 | `GET` | `/queue` | — | `{"currently_showing": true, "pending": [...], "count": 2}` |
+| `GET` | `/voice-context` | — | `{"active": true}` |
+| `DELETE` | `/voice-context` | — | `{"ok": true}` |
 
 ### Voice Pipeline
 
 ```
-Knob double-click → 10s recording (16kHz mono) → PSRAM
-    ↓
+Knob double-click → recording starts (up to 90s) → PSRAM
+    ↓ (single press knob to stop early)
 Daemon polls /api/status → audio_ready: true
     ↓
 GET /api/audio → WAV file → DELETE /api/audio
     ↓
-whisper.cpp transcribe (base.en, ~3s)
+whisper.cpp transcribe (base.en)
     ↓
-openclaw agent --agent main -m "[Voice from Watcher] hello"
+Set voice context (120s timeout) → send to OpenClaw (async)
+    ↓
+OpenClaw responds → calls speak() or display_message()
+    ↓
+Tool checks voice context + response_mode
+    ↓ (auto-pairs based on mode: both/voice_only/text_only)
+Clears voice context
 ```
 
 ### Presence Notifications
