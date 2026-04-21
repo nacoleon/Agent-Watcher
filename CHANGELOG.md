@@ -5,7 +5,13 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 ## [Unreleased]
 
 ### Added
-- **Push-to-talk voice input**: Double-click knob to record 5s of 16kHz audio, HTTP POST WAV to MCP server on port 3848, whisper-node transcribes locally, text delivered to OpenClaw via `sendLoggingMessage`. RGB LED feedback: blue (recording), yellow (uploading), green (success), red (error).
+- **Early stop recording**: Single knob press stops voice recording immediately instead of waiting for the full timeout. Double-click starts, single press stops.
+- **90-second recording timeout**: Increased from 10s to 90s (~2.88MB PSRAM buffer). Practical ceiling given available memory.
+- **Response mode setting**: New `response_mode` setting (`both`/`voice_only`/`text_only`, default: `both`) controls whether voice replies include text, voice, or both. Persisted in NVS across reboots. Configurable from Web UI "Reply Mode" dropdown in the Voice card.
+- **Voice reply auto-pairing**: When `response_mode` is `both`, the `speak` MCP tool automatically displays the response text on the LCD, and `display_message` automatically speaks it. Only applies to voice-triggered replies — proactive messages from OpenClaw remain under its control.
+- **Voice context tracking**: Daemon sets a 120-second voice context flag after transcription. MCP tools check this to determine if the current response is to a voice input.
+- **Direct gateway WebSocket client**: Daemon connects to OpenClaw gateway via persistent WebSocket (`ws://127.0.0.1:18789`) with Ed25519 device identity signing. Replaces `openclaw agent` CLI spawn. Message delivery dropped from ~40s to <1s.
+- **Push-to-talk voice input**: Double-click knob to record up to 90s of 16kHz audio, HTTP POST WAV to MCP server on port 3848, whisper-node transcribes locally, text delivered to OpenClaw via gateway WebSocket. RGB LED feedback: blue pulsing (recording), green (success), red (error).
 - **MCP audio server**: Express HTTP endpoint at `:3848/audio` receives WAV from Watcher, transcribes via whisper-node (whisper.cpp, Apple Silicon optimized), sends `voice_input: <text>` logging message to OpenClaw.
 - **RGB LED state blink**: WS2812 LED blinks every 10 seconds at 10% brightness with state-specific color — red (alert/down), orange (waiting), pink (greeting), green (reporting). LED turns off on knob dismiss and display sleep.
 - **Background auto-rotate toggle**: Web UI button and API field (`auto_rotate`) to pause/resume the 5-minute background rotation.
@@ -25,7 +31,13 @@ All notable changes to the PokéWatcher firmware will be documented in this file
 - **Sleeping position with dialog**: When a dialog is open, sleeping/down states position the sprite at bottom-center (visible below dialog) instead of center.
 - **sdkconfig simplified**: Removed DMA bounce buffer, removed SPI_MASTER_IN_IRAM, removed SSCMA task overrides, removed LVGL affinity settings. Minimal config matching monitor example + memory reserves.
 
+### Changed
+- **Recording animation state**: Uses `PW_STATE_REPORTING` (was `PW_STATE_WORKING`) during voice recording for a better visual fit.
+- **Text before voice on replies**: When auto-pairing is active, the text message displays on screen before TTS audio plays, so Zidane shows reporting animation while speaking.
+
 ### Fixed
+- **State animation not triggering via API**: `PUT /api/agent-state` was only updating the state data struct (`pw_agent_state_set`) without calling `pw_renderer_set_state`, so API-triggered state changes (including auto-paired display messages) never changed Zidane's animation. Now both are called.
+- **Recording animation not triggering**: Same bug in `voice_input.c` — recording state change never reached the renderer. Fixed by adding `pw_renderer_set_state` calls alongside `pw_agent_state_set`.
 - **SPI flush stall / fractal lines (root cause found and fixed)**: Error 0x101 was `ESP_ERR_NO_MEM` — LVGL draw buffers in PSRAM require DMA bounce buffers in internal SRAM. Fix: `CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=262144` reserves 256KB internal for DMA. DMA bounce buffer pre-allocation removed (stock BSP approach works).
 
 ### Previous Unreleased
