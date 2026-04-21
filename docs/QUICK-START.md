@@ -39,16 +39,26 @@ Insert the SD card into the Watcher's slot and power it on. The firmware loads s
 
 ## Step 3: Configure WiFi
 
-Edit `pokewatcher/main/config.h` and set your WiFi credentials:
+Edit `pokewatcher/main/config.h` and find the WiFi defaults (around line 49):
 
 ```c
-#define WIFI_SSID "YourNetworkName"
-#define WIFI_PASS "YourPassword"
+#define PW_WIFI_SSID_DEFAULT       "YourNetworkName"
+#define PW_WIFI_PASSWORD_DEFAULT   "YourPassword"
 ```
 
-The Watcher gets a static IP or DHCP address. Note the IP from the serial console after boot — you'll need it for the MCP config. The default in this project is `10.0.0.40`.
+Replace with your WiFi credentials. The Watcher gets a DHCP address — note the IP from the serial console after boot (you'll need it for MCP config).
 
-## Step 4: Build & Flash Firmware
+## Step 4: Get the SDK Components
+
+The firmware depends on Seeed Studio's SenseCAP Watcher SDK. Clone it to `/tmp`:
+
+```bash
+git clone https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware.git /tmp/SenseCAP-Watcher-Firmware
+```
+
+The build expects components at `/tmp/SenseCAP-Watcher-Firmware/components` (referenced in `pokewatcher/CMakeLists.txt`).
+
+## Step 5: Build & Flash Firmware
 
 **Critical:** The project path contains a space (`SenseCap Watcher`), which breaks the ESP-IDF linker. You MUST build from `/tmp`.
 
@@ -64,16 +74,21 @@ source ~/esp/esp-idf/export.sh
 cd /tmp/pokewatcher-build
 idf.py build
 
-# 4. Flash (app partition only — preserves NVS settings)
-idf.py -p /dev/cu.usbmodem5A8A0533623 app-flash
+# 4. Find your serial port
+ls /dev/cu.usb*
+# Look for something like /dev/cu.usbmodemXXXXX
 
-# 5. Monitor serial output to confirm boot
-idf.py -p /dev/cu.usbmodem5A8A0533623 monitor
+# 5. Flash (app partition only — preserves NVS settings)
+idf.py -p /dev/cu.usbmodemXXXXX app-flash
+
+# 6. Monitor serial output to confirm boot
+idf.py -p /dev/cu.usbmodemXXXXX monitor
+# (Ctrl+] to exit monitor)
 ```
 
-You should see Zidane appear on the 412×412 round LCD, walking to the idle position with a background image.
+You should see `[BOOT]` messages 1/7 through 7/7, then Zidane appears on the 412×412 round LCD walking to his idle position.
 
-## Step 5: Verify Watcher is Online
+## Step 6: Verify Watcher is Online
 
 Open a browser to `http://<WATCHER_IP>` (e.g., `http://10.0.0.40`). You should see the Watcher's built-in web dashboard with:
 
@@ -91,7 +106,7 @@ curl http://10.0.0.40/api/status
 
 Expected: JSON with `agent_state`, `person_present`, `uptime_seconds`, etc.
 
-## Step 6: Build the MCP Server
+## Step 7: Build the MCP Server
 
 ```bash
 cd watcher-mcp
@@ -112,7 +127,7 @@ cd node_modules/whisper-node/lib/whisper.cpp
 bash models/download-ggml-model.sh base.en
 ```
 
-## Step 7: Configure MCP in OpenClaw
+## Step 8: Configure MCP in OpenClaw
 
 Add the Watcher MCP server to your OpenClaw configuration. The exact config location depends on your OpenClaw setup, but the MCP server entry looks like:
 
@@ -134,7 +149,7 @@ export const WATCHER_URL = "http://YOUR_WATCHER_IP";
 ```
 Then rebuild: `npm run build`.
 
-## Step 8: Start the Daemon
+## Step 9: Start the Daemon
 
 The daemon runs 24/7 in the background, polling the Watcher for voice audio, presence changes, and message dismissals.
 
@@ -189,7 +204,7 @@ launchctl list | grep watcher
 # Should show the daemon with PID
 ```
 
-## Step 9: Install Piper TTS
+## Step 10: Install Piper TTS
 
 ```bash
 pip install piper-tts
@@ -199,7 +214,7 @@ piper --help
 
 Voice models are auto-downloaded on first use to `/tmp/piper-voices/`. The default voice is `en_US-bryce-medium`.
 
-## Step 10: Test Everything
+## Step 11: Test Everything
 
 ```bash
 # 1. Check Watcher status via MCP (if OpenClaw is running):

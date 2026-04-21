@@ -521,6 +521,19 @@ Your OpenClaw agent (`main`) should:
 
 ## Building & Flashing
 
+### WiFi Configuration
+
+Edit `pokewatcher/main/config.h` to set your WiFi credentials (around line 49):
+
+```c
+#define PW_WIFI_SSID_DEFAULT       "YourNetworkName"
+#define PW_WIFI_PASSWORD_DEFAULT   "YourPassword"
+```
+
+These are compiled into the firmware as defaults. The Watcher stores WiFi settings in NVS (non-volatile storage) — once connected, changing `config.h` requires a rebuild + flash. A full flash (`idf.py flash`) erases NVS and re-applies the defaults.
+
+After boot, the Watcher prints its IP address to the serial console. Note this IP for MCP configuration.
+
 ### Build from /tmp
 
 The project path contains a space (`SenseCap Watcher`) which breaks the ESP-IDF linker. Always build from `/tmp`:
@@ -537,7 +550,13 @@ The firmware references SDK components via an absolute path in `CMakeLists.txt`:
 ```
 /tmp/SenseCAP-Watcher-Firmware/components
 ```
-Make sure this SDK exists. During full rebuilds, move it to `_SDK_BAK` to avoid conflicts, then move it back.
+
+Clone the SDK if you don't have it:
+```bash
+git clone https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware.git /tmp/SenseCAP-Watcher-Firmware
+```
+
+During full rebuilds, move it to `_SDK_BAK` to avoid conflicts, then move it back.
 
 ### sdkconfig Rules
 
@@ -550,12 +569,18 @@ Make sure this SDK exists. During full rebuilds, move it to `_SDK_BAK` to avoid 
 
 ### Flash Commands
 
+Find your serial port first:
+```bash
+ls /dev/cu.usb*
+# Look for /dev/cu.usbmodemXXXXX (the exact name varies per device)
+```
+
 ```bash
 # App-only flash (preserves NVS/WiFi settings):
-idf.py -p /dev/cu.usbmodem5A8A0533623 app-flash
+idf.py -p /dev/cu.usbmodemXXXXX app-flash
 
 # Full flash (erases NVS — you'll need to re-enter WiFi):
-idf.py -p /dev/cu.usbmodem5A8A0533623 flash
+idf.py -p /dev/cu.usbmodemXXXXX flash
 
 # NEVER use full flash unless you need to reset NVS
 ```
@@ -563,7 +588,7 @@ idf.py -p /dev/cu.usbmodem5A8A0533623 flash
 ### Serial Monitor
 
 ```bash
-idf.py -p /dev/cu.usbmodem5A8A0533623 monitor
+idf.py -p /dev/cu.usbmodemXXXXX monitor
 # Ctrl+] to exit
 ```
 
@@ -625,7 +650,7 @@ Available Piper voices: any voice from [rhasspy/piper-voices](https://huggingfac
 ## Troubleshooting
 
 ### Watcher not reachable on network
-- Check WiFi credentials in `config.h`
+- Check WiFi credentials in `config.h` (`PW_WIFI_SSID_DEFAULT` and `PW_WIFI_PASSWORD_DEFAULT`)
 - Verify the IP in serial monitor output
 - Ensure your Mac is on the same network/subnet
 

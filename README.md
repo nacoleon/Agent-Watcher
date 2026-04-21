@@ -57,17 +57,19 @@ See the full [Quick Start Guide](docs/QUICK-START.md) for step-by-step setup. Th
 
 ```bash
 # 1. Prep SD card with sprites + Himax firmware from sdcard_prep/
-# 2. Set WiFi in pokewatcher/main/config.h
-# 3. Build & flash firmware (must build from /tmp — space in path breaks linker)
+# 2. Set WiFi in pokewatcher/main/config.h (PW_WIFI_SSID_DEFAULT / PW_WIFI_PASSWORD_DEFAULT)
+# 3. Clone the SDK
+git clone https://github.com/Seeed-Studio/SenseCAP-Watcher-Firmware.git /tmp/SenseCAP-Watcher-Firmware
+# 4. Build & flash firmware (must build from /tmp — space in path breaks linker)
 cp -r pokewatcher /tmp/pokewatcher-build
 cd /tmp/pokewatcher-build
 idf.py build
-idf.py -p /dev/cu.usbmodem5A8A0533623 app-flash
+idf.py -p /dev/cu.usbmodemXXXXX app-flash  # find your port: ls /dev/cu.usb*
 
-# 4. Build MCP server + download Whisper model
+# 5. Build MCP server + download Whisper model
 cd watcher-mcp && npm install && npm run build
 
-# 5. Start daemon
+# 6. Start daemon
 node watcher-mcp/dist/daemon.js
 
 # 6. Add MCP server to OpenClaw config
