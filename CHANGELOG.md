@@ -1,8 +1,28 @@
 # Changelog
 
-All notable changes to the PokéWatcher firmware will be documented in this file.
+All notable changes to Agent Watcher will be documented in this file.
 
 ## [Unreleased]
+
+### Added
+- **MCP idle timeout**: MCP server self-terminates after 5 minutes of no stdin activity, preventing orphaned "zombie" processes from accumulating when OpenClaw gateway doesn't close the stdio pipe.
+
+### Changed
+- **Poll interval reduced to 1s**: Device polling dropped from 5s to 1s, cutting voice message detection latency by ~4s on average. Periodic status log adjusted from every 60 polls to every 300 to maintain ~5min cadence.
+- **WiFi credentials externalized**: Moved SSID/password to `config.local.h` (gitignored) with `config.local.h.example` template. `config.h` uses placeholders and auto-includes the local override via `__has_include`. Git history scrubbed of prior credentials.
+- **WATCHER_URL configurable**: MCP server and daemon read `WATCHER_URL` from environment variable with fallback to `http://10.0.0.40`. No longer requires editing source to change device IP.
+
+### Fixed
+- **MCP zombie accumulation**: OpenClaw gateway spawns stdio MCP server processes that never exit after tool calls complete. Root cause: gateway doesn't close stdin pipe. Mitigated with 5-minute idle timeout auto-exit.
+
+### Documentation
+- **README rewritten**: Added repository structure, fixed quick start snippet (set-target, flash vs app-flash), updated MCP tools with auto-pairing, corrected requirements (Python 3, OpenClaw gateway).
+- **Quick Start guide**: Full 12-step zero-to-running setup for brand-new device + fresh Mac.
+- **Detailed Guide**: Complete feature reference covering all firmware, MCP, daemon, and Web UI features.
+
+---
+
+## [Previous Unreleased]
 
 ### Added
 - **Early stop recording**: Single knob press stops voice recording immediately instead of waiting for the full timeout. Double-click starts, single press stops.
