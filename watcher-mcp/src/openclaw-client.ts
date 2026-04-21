@@ -22,7 +22,7 @@ interface PendingRequest {
 
 function readGatewayToken(): string {
   try {
-    return execSync("openclaw config get gateway.auth.token", {
+    return execSync("/opt/homebrew/bin/openclaw config get gateway.auth.token", {
       encoding: "utf-8",
       timeout: 5000,
       stdio: ["pipe", "pipe", "pipe"],
