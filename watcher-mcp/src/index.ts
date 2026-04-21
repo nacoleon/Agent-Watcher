@@ -26,8 +26,6 @@ const transport = new StdioServerTransport();
 await server.connect(transport);
 
 // --- Lifecycle: clean exit when gateway closes the pipe ---
-// The MCP server is now stateless (no poller, no queue, no timers).
-// Zombie processes are harmless — they just sit idle using ~5MB RAM.
 
 function shutdown(reason: string): void {
   log("exit", `pid=${process.pid} reason="${reason}"`);
@@ -39,3 +37,13 @@ process.stdin.on("end", () => shutdown("stdin EOF"));
 process.stdin.on("close", () => shutdown("stdin closed"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
+
+// --- Idle timeout: exit if no stdin activity for 5 minutes ---
+// OpenClaw gateway doesn't always close the stdio pipe, leaving orphaned
+// processes. Tool calls complete in seconds, so 5 min of silence = abandoned.
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+let idleTimer = setTimeout(() => shutdown("idle timeout (5m)"), IDLE_TIMEOUT_MS);
+process.stdin.on("data", () => {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => shutdown("idle timeout (5m)"), IDLE_TIMEOUT_MS);
+});
