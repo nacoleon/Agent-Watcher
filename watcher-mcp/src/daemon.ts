@@ -20,7 +20,7 @@ import { writeFileSync, unlinkSync, mkdirSync, appendFileSync, existsSync } from
 import { tmpdir, homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFile, execFileSync, execSync } from "node:child_process";
+import { execFile, execFileSync, execSync, spawn } from "node:child_process";
 import { WATCHER_URL, POLL_INTERVAL_MS, DEBOUNCE_COUNT, WHISPER_MODEL } from "./config.js";
 
 // --- Config ---
@@ -276,16 +276,27 @@ function transcribe(wavPath: string): string {
 // MUST be async — execSync blocks the event loop and prevents the daemon
 // HTTP server from responding to /voice-context queries from MCP tools.
 function sendToZidane(message: string): void {
-  const args = ["agent", "--agent", "main", "-m", message, "--deliver", "--timeout", "60"];
-  execFile("/opt/homebrew/bin/openclaw", args, {
-    encoding: "utf-8",
+  const cmd = `openclaw agent --agent main -m ${JSON.stringify(message)} --deliver --timeout 60`;
+  const child = spawn("sh", ["-c", cmd], {
+    stdio: ["pipe", "pipe", "pipe"],
     timeout: 70000,
-  }, (err: any, stdout: string, stderr: string) => {
-    if (err) {
-      log("error", "Failed to send to OpenClaw", { error: err.message?.slice(0, 200), stderr: stderr?.slice(0, 200), stdout: stdout?.slice(0, 200) });
+  });
+
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
+  child.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+
+  child.on("close", (code) => {
+    if (code !== 0) {
+      log("error", "Failed to send to OpenClaw", { code, stderr: stderr.slice(0, 200), stdout: stdout.slice(0, 200) });
     } else {
       log("openclaw", `Sent to Zidane: "${message}"`);
     }
+  });
+
+  child.on("error", (err: any) => {
+    log("error", "Failed to spawn openclaw", { error: err.message });
   });
 }
 
