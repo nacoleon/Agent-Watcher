@@ -2,6 +2,7 @@
 #include "config.h"
 #include "dialog.h"
 #include "agent_state.h"
+#include "renderer.h"
 #include "sensecap-watcher.h"
 #include "esp_codec_dev.h"
 #include "esp_log.h"
@@ -64,9 +65,10 @@ static void voice_record_task(void *arg)
     pw_agent_state_data_t state_data = pw_agent_state_get();
     pw_agent_state_t prev_state = state_data.current_state;
 
-    // Visual feedback: blue LED + reporting state
+    // Visual feedback: blue LED + reporting state (both data + animation)
     bsp_rgb_set(0, 0, 26);  // blue
     pw_agent_state_set(PW_STATE_REPORTING);
+    pw_renderer_set_state(PW_STATE_REPORTING);
 
     // Free previous audio buffer if not yet consumed
     if (s_audio_buf) {
@@ -85,6 +87,7 @@ static void voice_record_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(500));
         bsp_rgb_set(0, 0, 0);
         pw_agent_state_set(prev_state);
+        pw_renderer_set_state(prev_state);
         s_recording = false;
         vTaskDelete(NULL);
         return;
@@ -135,6 +138,7 @@ static void voice_record_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(500));
         bsp_rgb_set(0, 0, 0);
         pw_agent_state_set(prev_state);
+        pw_renderer_set_state(prev_state);
         s_recording = false;
         vTaskDelete(NULL);
         return;
@@ -156,6 +160,7 @@ static void voice_record_task(void *arg)
     bsp_rgb_set(0, 0, 0);
 
     pw_agent_state_set(prev_state);  // restore state
+    pw_renderer_set_state(prev_state);
     s_recording = false;
 
     vTaskDelete(NULL);
