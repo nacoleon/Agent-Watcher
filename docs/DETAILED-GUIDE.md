@@ -449,3 +449,43 @@ openclaw agent --agent main -m "[Watcher event] person_arrived"
 ```
 
 **Logs:** `~/.openclaw/watcher-daemon-logs/daemon-YYYY-MM-DD.log`
+
+## OpenClaw Integration
+
+### MCP Configuration
+
+Add the Watcher MCP server to your OpenClaw MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "watcher": {
+      "command": "node",
+      "args": ["/absolute/path/to/watcher-mcp/dist/index.js"],
+      "transportType": "stdio"
+    }
+  }
+}
+```
+
+The MCP server is spawned on-demand by the OpenClaw gateway. It's fully stateless — no timers, no pollers. Multiple instances are safe (they all talk to the same daemon via localhost:8378).
+
+### Agent Events
+
+The daemon sends these events to OpenClaw via `openclaw agent --agent main -m "<message>"`:
+
+| Event | Message Format | Trigger |
+|---|---|---|
+| Voice input | `[Voice from Watcher] <transcribed text>` | User double-clicks knob and speaks |
+| Person arrived | `[Watcher event] person_arrived` | Person detected for 10s+ (2-poll debounce) |
+| Person left | `[Watcher event] person_left` | No person for 3 min + 10s debounce |
+
+### Recommended Agent Setup
+
+Your OpenClaw agent (`main`) should:
+
+1. **Call `heartbeat` every hour** to prevent the Watcher entering `down` state
+2. **Use `display_message` with appropriate states** — `greeting` for hellos, `alert` for urgent items, `reporting` for general info
+3. **Use `speak` for voice responses** — keep them short (1-2 sentences), conversational
+4. **Check `get_status` before decisions** — presence, current state, queue depth
+5. **React to `person_arrived`/`person_left`** — greet on arrival, sleep on departure
