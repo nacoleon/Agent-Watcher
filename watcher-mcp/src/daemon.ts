@@ -299,7 +299,7 @@ async function poll(): Promise<void> {
     pollCount++;
 
     // Periodic status log every 60 polls (~5 min)
-    if (pollCount % 60 === 1) {
+    if (pollCount % 300 === 1) {
       log("poll", `alive — uptime=${status.uptime_seconds}s audio_ready=${status.audio_ready} person=${status.person_present}`);
     }
 
