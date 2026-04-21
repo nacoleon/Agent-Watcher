@@ -29,7 +29,7 @@ const DAEMON_API_PORT = 8378;
 // --- Voice context (signals MCP tools that current response is to voice input) ---
 let voiceContextActive = false;
 let voiceContextTimer: ReturnType<typeof setTimeout> | null = null;
-const VOICE_CONTEXT_TIMEOUT_MS = 60000;
+const VOICE_CONTEXT_TIMEOUT_MS = 120000;
 
 function setVoiceContext(): void {
   voiceContextActive = true;
