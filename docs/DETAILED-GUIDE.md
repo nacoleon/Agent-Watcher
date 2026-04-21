@@ -54,3 +54,34 @@ Complete reference for the SenseCap Watcher firmware, MCP integration, and OpenC
 13. [Architecture Diagram](#architecture-diagram)
 
 ---
+
+## Project Overview
+
+The Zidane Watcher turns a SenseCap Watcher device into a physical AI desk companion for OpenClaw. It displays an animated Zidane (Final Fantasy IX) character on a 412×412 round LCD screen, detects people and gestures via a Himax AI camera, accepts voice input through a built-in microphone, and speaks responses through its speaker using Piper TTS.
+
+The system has three components:
+
+| Component | Runs on | Role |
+|---|---|---|
+| **Firmware** (`pokewatcher/`) | ESP32-S3 (Watcher device) | Display rendering, camera AI, web server, voice recording, hardware control |
+| **MCP Server** (`watcher-mcp/src/index.ts`) | Mac (spawned by OpenClaw) | Stateless stdio bridge — 7 tools for OpenClaw to control the Watcher |
+| **Daemon** (`watcher-mcp/src/daemon.ts`) | Mac (LaunchAgent, 24/7) | Polls Watcher every 5s for voice audio, presence changes, message dismissals. Owns the message queue. Sends events to OpenClaw. |
+
+Communication: Mac ↔ Watcher over HTTP (port 80). MCP Server ↔ Daemon over localhost HTTP (port 8378). Daemon → OpenClaw via `openclaw agent` CLI.
+
+## Hardware
+
+The SenseCap Watcher is an ESP32-S3 device with these peripherals:
+
+| Peripheral | Interface | Details |
+|---|---|---|
+| LCD Display | SPI (HSPI) | 412×412 round, ST7701 controller |
+| Himax WE2 Camera | SPI2 (VSPI) | AI chip with onboard models, 12 MHz SPI clock |
+| Microphone | I2S | 16kHz/16-bit mono, PSRAM buffer |
+| Speaker | I2S + codec | 16kHz/16-bit mono PCM playback |
+| Rotary Knob | GPIO (encoder + button) | Press, double-press, long-press, rotate |
+| RGB LED | GPIO | Programmable color, used for state indication |
+| SD Card | SPI2 (shared with Himax) | FAT32, powered off after boot to free SPI bus |
+| WiFi | Built-in ESP32-S3 | 2.4GHz, used for REST API and web UI |
+| IO Expander | I2C | Controls power to LCD, camera, SD card |
+| Battery | ADC | Optional LiPo, not used in desk mode |
