@@ -489,3 +489,183 @@ Your OpenClaw agent (`main`) should:
 3. **Use `speak` for voice responses** — keep them short (1-2 sentences), conversational
 4. **Check `get_status` before decisions** — presence, current state, queue depth
 5. **React to `person_arrived`/`person_left`** — greet on arrival, sleep on departure
+
+## Building & Flashing
+
+### Build from /tmp
+
+The project path contains a space (`SenseCap Watcher`) which breaks the ESP-IDF linker. Always build from `/tmp`:
+
+```bash
+rm -rf /tmp/pokewatcher-build
+cp -r pokewatcher /tmp/pokewatcher-build
+source ~/esp/esp-idf/export.sh
+cd /tmp/pokewatcher-build
+idf.py build
+```
+
+The firmware references SDK components via an absolute path in `CMakeLists.txt`:
+```
+/tmp/SenseCAP-Watcher-Firmware/components
+```
+Make sure this SDK exists. During full rebuilds, move it to `_SDK_BAK` to avoid conflicts, then move it back.
+
+### sdkconfig Rules
+
+- `sdkconfig` is auto-generated from `sdkconfig.defaults`
+- **Delete `sdkconfig` before changing `sdkconfig.defaults`** — the old config silently takes precedence
+- Critical settings that MUST NOT change:
+  - `CONFIG_FREERTOS_HZ=1000` — camera breaks at 100
+  - `CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=262144` — DMA bounce buffer needs internal RAM
+  - `CONFIG_LVGL_PORT_LOCK_MUTEX_TIMEOUT=500` — prevents SPI flush deadlock
+
+### Flash Commands
+
+```bash
+# App-only flash (preserves NVS/WiFi settings):
+idf.py -p /dev/cu.usbmodem5A8A0533623 app-flash
+
+# Full flash (erases NVS — you'll need to re-enter WiFi):
+idf.py -p /dev/cu.usbmodem5A8A0533623 flash
+
+# NEVER use full flash unless you need to reset NVS
+```
+
+### Serial Monitor
+
+```bash
+idf.py -p /dev/cu.usbmodem5A8A0533623 monitor
+# Ctrl+] to exit
+```
+
+Look for `[BOOT]` messages confirming each init step (1/7 through 7/7).
+
+## SD Card Setup
+
+### Sprite Assets
+
+Place these files at the SD card root:
+
+| File | Source | Description |
+|---|---|---|
+| `overworld.raw` | `sdcard_prep/characters/zidane/` | RGB565 sprite sheet |
+| `frames.json` | `sdcard_prep/characters/zidane/` | Animation frame definitions |
+
+### Himax Firmware
+
+Place all `.img` files from `sdcard_prep/himax/` at the SD card root. The firmware OTA-flashes the Himax chip if the SD version is newer than what's on-chip.
+
+**Note:** After loading sprites and checking Himax firmware, the firmware powers off the SD card to free the SPI2 MISO line for the camera. The SD card is not accessible after boot.
+
+## Customization
+
+### Adding Sprites
+
+To create new character sprites:
+
+1. Get a sprite sheet PNG with transparent background
+2. Convert to RGB565 `.raw` format:
+   ```bash
+   python3 sdcard_prep/convert_sprites.py input.png output.raw
+   ```
+3. Create a `frames.json` defining each animation frame with `x`, `y`, `width`, `height`, `animation`, `frame_index`, `speed`, `mirror`
+4. Place both files on the SD card root
+5. Update animation mappings in `pokewatcher/main/sprite_loader.c` if animation names differ
+
+### Changing Backgrounds
+
+Background tiles are 412×412 RGB565 `.raw` files loaded at boot. To add new backgrounds:
+
+1. Create a 412×412 PNG
+2. Convert to RGB565: `python3 sdcard_prep/convert_bg.py input.png output.raw`
+3. Add to the background tile array in the firmware
+4. Rebuild and flash
+
+### Voice Configuration
+
+Set voice and volume via the API (persisted to NVS):
+
+```bash
+curl -X PUT http://10.0.0.40/api/voice \
+  -H "Content-Type: application/json" \
+  -d '{"voice": "en_US-amy-medium", "volume": 80}'
+```
+
+Available Piper voices: any voice from [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) in the format `{lang}-{name}-{quality}` (e.g., `en_US-bryce-medium`, `en_US-amy-low`).
+
+## Troubleshooting
+
+### Watcher not reachable on network
+- Check WiFi credentials in `config.h`
+- Verify the IP in serial monitor output
+- Ensure your Mac is on the same network/subnet
+
+### Camera not detecting anything
+- Verify `CONFIG_FREERTOS_HZ=1000` in sdkconfig
+- Check serial logs for Himax SPI errors
+- Confirm SD card had `.img` firmware files (check boot logs for OTA flash)
+- Camera won't work if SD card power-off failed (SPI2 MISO contention)
+
+### Display frozen / DMA errors
+- Ensure `CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=262144` in sdkconfig
+- Never call `lv_obj_set_style_*()` every frame on objects >100×100 pixels
+- All LVGL calls must be in the renderer task only — other threads set volatile flags
+
+### Build fails with "cannot find -l..." or linker errors
+- You're building from a path with spaces. Use `/tmp/pokewatcher-build/`
+- Check that `/tmp/SenseCAP-Watcher-Firmware/components` exists
+
+### Voice not transcribing
+- Verify whisper.cpp binary: `ls watcher-mcp/node_modules/whisper-node/lib/whisper.cpp/main`
+- Verify model: `ls watcher-mcp/node_modules/whisper-node/lib/whisper.cpp/models/ggml-base.en.bin`
+- Check daemon logs: `tail -f ~/.openclaw/watcher-daemon-logs/daemon-$(date +%Y-%m-%d).log`
+
+### TTS not working
+- Verify Piper: `piper --help`
+- Check voice model downloaded: `ls /tmp/piper-voices/en_US-bryce-medium.onnx`
+- Check daemon logs for `tts` category errors
+
+### Daemon not running
+- Check LaunchAgent: `launchctl list | grep watcher`
+- Manual start: `node watcher-mcp/dist/daemon.js`
+- Port conflict: `lsof -i :8378` — only one daemon instance allowed
+
+## Architecture Diagram
+
+```
+┌──────────────────────────────────────────────────────┐
+│                    OpenClaw Agent                      │
+│                   ("main" agent)                       │
+│                                                        │
+│  Receives: voice transcriptions, presence events       │
+│  Sends: display_message, speak, set_state, heartbeat   │
+└───────────────┬───────────────────┬───────────────────┘
+                │ MCP (stdio)       │ CLI
+                ▼                   ▼
+┌───────────────────┐  ┌─────────────────────────────┐
+│   MCP Server      │  │     Watcher Daemon           │
+│  (stateless)      │  │  (LaunchAgent, 24/7)         │
+│                   │  │                               │
+│  7 tools          │  │  Polls every 5s:              │
+│  1 resource       │  │  - Voice audio → transcribe   │
+│                   │  │  - Presence → notify           │
+│  Enqueues msgs    │  │  - Dismiss → next message     │
+│  via daemon API   │  │  - Reboot → recovery          │
+│  localhost:8378   │  │                               │
+└───────┬───────────┘  │  Owns message queue (max 10)  │
+        │              │  API: localhost:8378            │
+        │              └──────────┬────────────────────┘
+        │                         │
+        │    HTTP (port 80)       │
+        ▼                         ▼
+┌──────────────────────────────────────────────────────┐
+│              SenseCap Watcher (ESP32-S3)               │
+│                                                        │
+│  ┌─────────┐ ┌──────────┐ ┌────────────┐ ┌────────┐  │
+│  │Renderer │ │Web Server│ │ Himax Task │ │ Voice  │  │
+│  │ (LVGL)  │ │ (REST)   │ │ (Camera AI)│ │ Input  │  │
+│  └─────────┘ └──────────┘ └────────────┘ └────────┘  │
+│                                                        │
+│  412×412 LCD  │  Speaker  │  Mic  │  Knob  │  LED     │
+└──────────────────────────────────────────────────────┘
+```
