@@ -20,4 +20,10 @@ const uint8_t *pw_voice_get_audio(size_t *out_size);
 // Free the audio buffer after the MCP server has fetched it
 void pw_voice_clear_audio(void);
 
+// Returns true if currently recording audio
+bool pw_voice_is_recording(void);
+
+// Request early stop of current recording (safe to call from button callback)
+void pw_voice_request_stop(void);
+
 #endif

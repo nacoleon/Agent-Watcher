@@ -1,6 +1,7 @@
 #include "dialog.h"
 #include "renderer.h"
 #include "config.h"
+#include "voice_input.h"
 #include "sensecap-watcher.h"
 #include "iot_knob.h"
 #include "iot_button.h"
@@ -101,6 +102,10 @@ static volatile bool s_btn_wake_requested = false;
 
 static void knob_btn_cb(void *arg, void *data)
 {
+    if (pw_voice_is_recording()) {
+        pw_voice_request_stop();
+        return;
+    }
     s_knob_pressed = true;
     s_btn_wake_requested = true;
 }
