@@ -20,7 +20,7 @@ import { writeFileSync, unlinkSync, mkdirSync, appendFileSync, existsSync } from
 import { tmpdir, homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync, execSync } from "node:child_process";
+import { execFile, execFileSync, execSync } from "node:child_process";
 import { WATCHER_URL, POLL_INTERVAL_MS, DEBOUNCE_COUNT, WHISPER_MODEL } from "./config.js";
 
 // --- Config ---
@@ -276,12 +276,10 @@ function transcribe(wavPath: string): string {
 // MUST be async — execSync blocks the event loop and prevents the daemon
 // HTTP server from responding to /voice-context queries from MCP tools.
 function sendToZidane(message: string): void {
-  const { execFile } = require("node:child_process");
   const args = ["agent", "--agent", "main", "-m", message, "--deliver", "--timeout", "60"];
-  const child = execFile("openclaw", args, {
+  execFile("openclaw", args, {
     encoding: "utf-8",
     timeout: 70000,
-    stdio: ["pipe", "pipe", "pipe"],
   }, (err: any, _stdout: string, _stderr: string) => {
     if (err) {
       log("error", "Failed to send to OpenClaw", { error: err.message?.slice(0, 200) });
