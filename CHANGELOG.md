@@ -8,12 +8,17 @@ All notable changes to Agent Watcher will be documented in this file.
 - **MCP idle timeout**: MCP server self-terminates after 5 minutes of no stdin activity, preventing orphaned "zombie" processes from accumulating when OpenClaw gateway doesn't close the stdio pipe.
 
 ### Changed
+- **DOWN state persists through sleep/wake**: DOWN state no longer gets overwritten by the pre-sleep SLEEPING transition. Display still turns off on idle timeout, but agent state stays DOWN. Waking the display (button, person detection, gesture) goes straight to the DOWN animation — no wakeup animation plays.
+- **LED suppressed while display sleeps**: RGB LED blink is fully dark when the display is off. LED activates when the display wakes back up.
+- **Any OpenClaw API call recovers from DOWN**: Previously only heartbeat recovered from DOWN → IDLE. Now any write endpoint (message, state change, background, model, audio play, voice config) also recovers, since it proves the agent is alive.
+- **Person/gesture detection preserves DOWN**: Person detection and gesture detection wake the display but no longer override DOWN → IDLE. Only OpenClaw API calls can clear DOWN state.
 - **Poll interval reduced to 1s**: Device polling dropped from 5s to 1s, cutting voice message detection latency by ~4s on average. Periodic status log adjusted from every 60 polls to every 300 to maintain ~5min cadence.
 - **WiFi credentials externalized**: Moved SSID/password to `config.local.h` (gitignored) with `config.local.h.example` template. `config.h` uses placeholders and auto-includes the local override via `__has_include`. Git history scrubbed of prior credentials.
 - **WATCHER_URL configurable**: MCP server and daemon read `WATCHER_URL` from environment variable with fallback to `http://10.0.0.40`. No longer requires editing source to change device IP.
 
 ### Fixed
 - **MCP zombie accumulation**: OpenClaw gateway spawns stdio MCP server processes that never exit after tool calls complete. Root cause: gateway doesn't close stdin pipe. Mitigated with 5-minute idle timeout auto-exit.
+- **Stale web embed references**: Removed orphaned `style.css` and `app.js` references from CMakeLists.txt and web_server.c (files were deleted in a prior commit but references remained).
 
 ### Documentation
 - **README rewritten**: Added repository structure, fixed quick start snippet (set-target, flash vs app-flash), updated MCP tools with auto-pairing, corrected requirements (Python 3, OpenClaw gateway).
