@@ -995,7 +995,8 @@ static void renderer_task(void *arg)
         static bool s_pre_sleep_triggered = false;
         if (!s_display_sleeping && !s_pre_sleep_triggered &&
             idle_ms >= (PW_DISPLAY_SLEEP_TIMEOUT_MS - PW_SLEEP_STATE_BEFORE_MS) &&
-            s_current_state != PW_STATE_SLEEPING) {
+            s_current_state != PW_STATE_SLEEPING &&
+            s_current_state != PW_STATE_DOWN) {
             s_pre_sleep_triggered = true;
             s_pending_state = PW_STATE_SLEEPING;
             s_state_changed = true;
