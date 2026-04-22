@@ -38,12 +38,9 @@ process.stdin.on("close", () => shutdown("stdin closed"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 
-// --- Idle timeout: exit if no stdin activity for 5 minutes ---
-// OpenClaw gateway doesn't always close the stdio pipe, leaving orphaned
-// processes. Tool calls complete in seconds, so 5 min of silence = abandoned.
-const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
-let idleTimer = setTimeout(() => shutdown("idle timeout (5m)"), IDLE_TIMEOUT_MS);
-process.stdin.on("data", () => {
-  clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => shutdown("idle timeout (5m)"), IDLE_TIMEOUT_MS);
-});
+// Orphan detection: if parent process dies (gateway crash/restart), we get
+// reparented to PID 1 (launchd). Poll ppid to detect this and exit cleanly.
+const startupPpid = process.ppid;
+setInterval(() => {
+  if (process.ppid !== startupPpid) shutdown("parent died (orphaned)");
+}, 30_000);

@@ -303,8 +303,10 @@ async function poll(): Promise<void> {
       log("poll", `alive — uptime=${status.uptime_seconds}s audio_ready=${status.audio_ready} person=${status.person_present}`);
     }
 
-    // Reboot detection
-    if (lastUptime !== null && status.uptime_seconds < lastUptime) {
+    // Reboot detection — require a significant drop to avoid false positives
+    // from 1s polling jitter (ESP32 uptime_seconds can flicker by ±1-2s)
+    const REBOOT_THRESHOLD = 30;
+    if (lastUptime !== null && status.uptime_seconds < lastUptime - REBOOT_THRESHOLD) {
       log("reboot", `Watcher rebooted (uptime ${lastUptime}s → ${status.uptime_seconds}s)`);
       await onReboot();
     }
