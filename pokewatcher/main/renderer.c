@@ -1159,7 +1159,8 @@ static void renderer_task(void *arg)
             }
 
             // RGB LED blink: flash state color for 3 frames every 100 frames (~10s at 10 FPS)
-            {
+            // Suppressed while display is sleeping — LED activates when display wakes
+            if (!s_display_sleeping) {
                 int blink_phase = s_frame_counter % 100;
                 if (blink_phase == 0) {
                     // Turn on: state-specific color
