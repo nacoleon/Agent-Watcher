@@ -854,27 +854,33 @@ static void renderer_task(void *arg)
             }
             display_wake();
 
-            // If display was actually off, play wakeup animation before anything else
             if (woke_from_display_off) {
-                // Queue whatever state change is pending — we'll apply it after wakeup
-                if (s_state_changed) {
-                    s_wakeup_queued_state = s_pending_state;
-                    s_wakeup_has_queued_state = true;
-                    s_state_changed = false;  // consume — will re-apply after wakeup
-                }
+                if (s_current_state == PW_STATE_DOWN) {
+                    // DOWN state: skip wakeup animation, stay in DOWN
+                    s_state_visuals_dirty = true;
+                    s_behav_state = BEHAV_IDLE;
+                    ESP_LOGI(TAG, "Display woke from off — staying in DOWN (no wakeup anim)");
+                } else {
+                    // Queue whatever state change is pending — we'll apply it after wakeup
+                    if (s_state_changed) {
+                        s_wakeup_queued_state = s_pending_state;
+                        s_wakeup_has_queued_state = true;
+                        s_state_changed = false;
+                    }
 
-                // Start wakeup animation at current position (sleeping/down pos)
-                s_wakeup_playing = true;
-                s_current_state = PW_STATE_WAKEUP;
-                const pw_animation_t *wake_anim = pw_sprite_get_state_anim(&s_sprite, PW_STATE_WAKEUP);
-                if (wake_anim) {
-                    s_current_anim = wake_anim;
-                    s_current_frame = 0;
-                    s_frame_tick = 0;
+                    // Start wakeup animation at current position (sleeping/down pos)
+                    s_wakeup_playing = true;
+                    s_current_state = PW_STATE_WAKEUP;
+                    const pw_animation_t *wake_anim = pw_sprite_get_state_anim(&s_sprite, PW_STATE_WAKEUP);
+                    if (wake_anim) {
+                        s_current_anim = wake_anim;
+                        s_current_frame = 0;
+                        s_frame_tick = 0;
+                    }
+                    s_behav_state = BEHAV_IDLE;
+                    s_state_visuals_dirty = true;
+                    ESP_LOGI(TAG, "Display woke from off — playing wakeup animation");
                 }
-                s_behav_state = BEHAV_IDLE;
-                s_state_visuals_dirty = true;
-                ESP_LOGI(TAG, "Display woke from off — playing wakeup animation");
             }
         }
 
