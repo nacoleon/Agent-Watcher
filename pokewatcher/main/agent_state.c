@@ -168,8 +168,7 @@ static void agent_state_task(void *arg)
                     pw_agent_state_set_person_present(true);
                     log_presence_event(true);
                     pw_renderer_wake_display();
-                    if (s_state.current_state == PW_STATE_SLEEPING ||
-                        s_state.current_state == PW_STATE_DOWN) {
+                    if (s_state.current_state == PW_STATE_SLEEPING) {
                         pw_agent_state_set(PW_STATE_IDLE);
                     }
                     break;
@@ -184,8 +183,7 @@ static void agent_state_task(void *arg)
                 case PW_EVENT_GESTURE_DETECTED:
                     log_gesture_event(event.data.gesture.gesture, event.data.gesture.score, event.data.gesture.box_w, event.data.gesture.box_h);
                     ESP_LOGI(TAG, "Gesture: %s (score=%d)", event.data.gesture.gesture, event.data.gesture.score);
-                    if (s_state.current_state == PW_STATE_SLEEPING ||
-                        s_state.current_state == PW_STATE_DOWN) {
+                    if (s_state.current_state == PW_STATE_SLEEPING) {
                         pw_agent_state_set(PW_STATE_IDLE);
                     }
                     break;
