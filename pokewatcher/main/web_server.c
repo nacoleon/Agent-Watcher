@@ -166,8 +166,19 @@ static esp_err_t handle_api_status(httpd_req_t *req)
     return ESP_OK;
 }
 
+static void recover_from_down(void)
+{
+    pw_agent_state_data_t state = pw_agent_state_get();
+    if (state.current_state == PW_STATE_DOWN) {
+        ESP_LOGI(TAG, "OpenClaw API call: recovering from DOWN -> IDLE");
+        pw_agent_state_set(PW_STATE_IDLE);
+        pw_renderer_set_state(PW_STATE_IDLE);
+    }
+}
+
 static esp_err_t handle_api_agent_state(httpd_req_t *req)
 {
+    recover_from_down();
     char body[128];
     int ret = recv_full_body(req, body, sizeof(body));
     if (ret <= 0) {
@@ -206,6 +217,7 @@ static esp_err_t handle_api_agent_state(httpd_req_t *req)
 
 static esp_err_t handle_api_message(httpd_req_t *req)
 {
+    recover_from_down();
     char body[1280];
     int ret = recv_full_body(req, body, sizeof(body));
     if (ret <= 0) {
@@ -251,6 +263,7 @@ static esp_err_t handle_api_message(httpd_req_t *req)
 
 static esp_err_t handle_api_background(httpd_req_t *req)
 {
+    recover_from_down();
     char body[128];
     int ret = recv_full_body(req, body, sizeof(body));
     if (ret <= 0) {
@@ -311,13 +324,7 @@ static esp_err_t handle_api_heartbeat(httpd_req_t *req)
 
     ESP_LOGI(TAG, "Heartbeat received at %lld ms (log count=%d)", now_ms, s_heartbeat_log_count);
 
-    // Auto-recover from "down" state
-    pw_agent_state_data_t state = pw_agent_state_get();
-    if (state.current_state == PW_STATE_DOWN) {
-        ESP_LOGI(TAG, "Heartbeat: recovering from DOWN -> IDLE");
-        pw_agent_state_set(PW_STATE_IDLE);
-        pw_renderer_wake_display();
-    }
+    recover_from_down();
 
     cJSON *resp = cJSON_CreateObject();
     cJSON_AddBoolToObject(resp, "ok", true);
@@ -332,6 +339,7 @@ static esp_err_t handle_api_heartbeat(httpd_req_t *req)
 
 static esp_err_t handle_api_model(httpd_req_t *req)
 {
+    recover_from_down();
     char body[64];
     int ret = recv_full_body(req, body, sizeof(body));
     if (ret <= 0) {
@@ -418,6 +426,7 @@ static esp_err_t handle_api_audio_delete(httpd_req_t *req)
 
 static esp_err_t handle_api_audio_play(httpd_req_t *req)
 {
+    recover_from_down();
     if (s_playing) {
         httpd_resp_set_status(req, "409 Conflict");
         httpd_resp_set_type(req, "application/json");
@@ -470,6 +479,7 @@ static esp_err_t handle_api_voice_get(httpd_req_t *req)
 
 static esp_err_t handle_api_voice_put(httpd_req_t *req)
 {
+    recover_from_down();
     char body[256];
     int len = recv_full_body(req, body, sizeof(body));
     if (len < 0) {
