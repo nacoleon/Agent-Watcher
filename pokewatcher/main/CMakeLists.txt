@@ -30,6 +30,4 @@ idf_component_register(
         driver
     EMBED_FILES
         "web/index.html"
-        "web/style.css"
-        "web/app.js"
 )

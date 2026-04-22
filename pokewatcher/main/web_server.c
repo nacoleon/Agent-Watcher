@@ -75,10 +75,6 @@ static int recv_full_body(httpd_req_t *req, char *buf, int buf_size)
 
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[]   asm("_binary_index_html_end");
-extern const uint8_t style_css_start[] asm("_binary_style_css_start");
-extern const uint8_t style_css_end[]   asm("_binary_style_css_end");
-extern const uint8_t app_js_start[] asm("_binary_app_js_start");
-extern const uint8_t app_js_end[]   asm("_binary_app_js_end");
 
 static esp_err_t serve_embedded(httpd_req_t *req, const uint8_t *start, const uint8_t *end, const char *content_type)
 {
@@ -88,8 +84,6 @@ static esp_err_t serve_embedded(httpd_req_t *req, const uint8_t *start, const ui
 }
 
 static esp_err_t handle_index(httpd_req_t *req) { return serve_embedded(req, index_html_start, index_html_end, "text/html"); }
-static esp_err_t handle_css(httpd_req_t *req) { return serve_embedded(req, style_css_start, style_css_end, "text/css"); }
-static esp_err_t handle_js(httpd_req_t *req) { return serve_embedded(req, app_js_start, app_js_end, "application/javascript"); }
 
 static esp_err_t handle_api_status(httpd_req_t *req)
 {
@@ -526,8 +520,6 @@ static void register_routes(httpd_handle_t server)
 {
     httpd_uri_t routes[] = {
         { .uri = "/",             .method = HTTP_GET,    .handler = handle_index },
-        { .uri = "/style.css",    .method = HTTP_GET,    .handler = handle_css },
-        { .uri = "/app.js",       .method = HTTP_GET,    .handler = handle_js },
         { .uri = "/api/status",   .method = HTTP_GET,    .handler = handle_api_status },
     };
 
