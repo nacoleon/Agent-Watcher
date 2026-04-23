@@ -24,6 +24,8 @@ All notable changes to Agent Watcher will be documented in this file.
 - **README rewritten**: Added repository structure, fixed quick start snippet (set-target, flash vs app-flash), updated MCP tools with auto-pairing, corrected requirements (Python 3, OpenClaw gateway).
 - **Quick Start guide**: Full 12-step zero-to-running setup for brand-new device + fresh Mac.
 - **Detailed Guide**: Complete feature reference covering all firmware, MCP, daemon, and Web UI features.
+- **EHOSTUNREACH daemon knowledgebase**: `docs/knowledgebase/ehostunreach-daemon-bug.md` documents the daemon-stuck-on-EHOSTUNREACH bug (likely ExpressVPN NKE), kickstart workaround, and investigation notes.
+- **DOWN state sleep/wake plan**: `docs/superpowers/plans/2026-04-21-down-state-sleep-wake.md` archives the implementation plan behind the DOWN-state persistence fixes shipped this release.
 
 ---
 
