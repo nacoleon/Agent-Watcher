@@ -1037,6 +1037,9 @@ static void renderer_task(void *arg)
                     s_heartbeat_timeout_triggered = true;
                     s_pending_state = PW_STATE_DOWN;
                     s_state_changed = true;
+                    // Keep agent_state in sync so recover_from_down() sees DOWN
+                    // when the next heartbeat arrives and properly restores IDLE.
+                    pw_agent_state_set(PW_STATE_DOWN);
                     ESP_LOGW(TAG, "Heartbeat timeout — switching to DOWN state");
                 }
                 if (now_ms - last_hb < HEARTBEAT_TIMEOUT_MS) {
