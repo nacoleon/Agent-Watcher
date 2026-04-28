@@ -17,6 +17,7 @@ All notable changes to Agent Watcher will be documented in this file.
 - **WATCHER_URL configurable**: MCP server and daemon read `WATCHER_URL` from environment variable with fallback to `http://10.0.0.40`. No longer requires editing source to change device IP.
 
 ### Fixed
+- **Dialog dismiss did not sync agent_state**: When the user dismissed a greeting/alert/reporting dialog by pressing the knob, the renderer animation switched to idle but `pw_agent_state` stayed on the previous state — so the Web UI kept reporting the old state until the next OpenClaw event. Dismiss path now calls `pw_agent_state_set(PW_STATE_IDLE)` alongside the renderer reset, matching the pattern used in `voice_input.c` and `web_server.c`.
 - **MCP zombie accumulation**: OpenClaw gateway spawns stdio MCP server processes that never exit after tool calls complete. Root cause: gateway doesn't close stdin pipe. Mitigated with 5-minute idle timeout auto-exit.
 - **Stale web embed references**: Removed orphaned `style.css` and `app.js` references from CMakeLists.txt and web_server.c (files were deleted in a prior commit but references remained).
 

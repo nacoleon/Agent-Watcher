@@ -1,5 +1,6 @@
 #include "dialog.h"
 #include "renderer.h"
+#include "agent_state.h"
 #include "config.h"
 #include "voice_input.h"
 #include "sensecap-watcher.h"
@@ -342,6 +343,7 @@ void pw_dialog_tick(void)
         s_dismiss_count++;
         ESP_LOGI(TAG, "Dialog dismissed by knob press (dismiss_count=%d)", s_dismiss_count);
         pw_dialog_hide();
+        pw_agent_state_set(PW_STATE_IDLE);
         pw_renderer_set_state(PW_STATE_IDLE);
         bsp_rgb_set(0, 0, 0);
         return;
