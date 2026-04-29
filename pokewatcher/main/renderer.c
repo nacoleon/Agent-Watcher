@@ -1006,6 +1006,8 @@ static void renderer_task(void *arg)
             s_pre_sleep_triggered = true;
             s_pending_state = PW_STATE_SLEEPING;
             s_state_changed = true;
+            // Keep agent_state in sync so the Web UI shows SLEEPING, not stale IDLE.
+            pw_agent_state_set(PW_STATE_SLEEPING);
             ESP_LOGI(TAG, "Pre-sleep: switching to sleeping state");
         }
 
