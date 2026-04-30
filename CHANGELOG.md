@@ -5,7 +5,7 @@ All notable changes to Agent Watcher will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- **MCP idle timeout**: MCP server self-terminates after 5 minutes of no stdin activity, preventing orphaned "zombie" processes from accumulating when OpenClaw gateway doesn't close the stdio pipe.
+- **MCP server orphan detection**: MCP server polls its parent process every 30s; if the parent dies (gateway crash/restart), the orphaned MCP exits cleanly. Replaces the previous 5-minute idle timeout, which broke OpenClaw's cached MCP sessions and caused "Not connected" errors.
 
 ### Changed
 - **DOWN state persists through sleep/wake**: DOWN state no longer gets overwritten by the pre-sleep SLEEPING transition. Display still turns off on idle timeout, but agent state stays DOWN. Waking the display (button, person detection, gesture) goes straight to the DOWN animation — no wakeup animation plays.
@@ -17,16 +17,18 @@ All notable changes to Agent Watcher will be documented in this file.
 - **WATCHER_URL configurable**: MCP server and daemon read `WATCHER_URL` from environment variable with fallback to `http://10.0.0.40`. No longer requires editing source to change device IP.
 
 ### Fixed
+- **Heartbeat watchdog DOWN did not sync agent_state**: The renderer's 1.5h heartbeat-timeout watchdog set its internal `s_pending_state = PW_STATE_DOWN` but never called `pw_agent_state_set(PW_STATE_DOWN)`. When heartbeats later resumed, `recover_from_down()` saw the stale agent_state (often IDLE/GREETING) and skipped recovery, leaving the display permanently stuck on DOWN animation + red LED while the API reported a healthy state. Fixed by syncing both at watchdog trigger time.
 - **Pre-sleep transition did not sync agent_state**: When the renderer auto-triggered the SLEEPING state before turning the display off, only the renderer's internal state was updated — `pw_agent_state` stayed on IDLE, so the Web UI kept reporting IDLE while the animation showed SLEEPING. The pre-sleep block now calls `pw_agent_state_set(PW_STATE_SLEEPING)`, matching the pattern already used by the heartbeat→DOWN transition.
 - **Dialog dismiss did not sync agent_state**: When the user dismissed a greeting/alert/reporting dialog by pressing the knob, the renderer animation switched to idle but `pw_agent_state` stayed on the previous state — so the Web UI kept reporting the old state until the next OpenClaw event. Dismiss path now calls `pw_agent_state_set(PW_STATE_IDLE)` alongside the renderer reset, matching the pattern used in `voice_input.c` and `web_server.c`.
-- **MCP zombie accumulation**: OpenClaw gateway spawns stdio MCP server processes that never exit after tool calls complete. Root cause: gateway doesn't close stdin pipe. Mitigated with 5-minute idle timeout auto-exit.
+- **False reboot detection at 1s polling**: Daemon reboot detection (`uptime < lastUptime`) treated any decrease as a reboot. With 1s polling, the ESP32's integer `uptime_seconds` occasionally jittered ±1-2s, producing dozens of false-positive "reboot" events per day that triggered unnecessary message resends and reset dismiss counts. Now requires a 30+ second drop to count as a real reboot.
+- **MCP "Not connected" errors after idle timeout**: OpenClaw caches MCP sessions per-agent and has no reconnection logic; if the MCP process exited (via the previous 5-minute idle timeout), every subsequent `speak`/`heartbeat` tool call returned "Not connected" until the entire agent session restarted. Replaced the idle timeout with parent-process orphan detection so the MCP server stays alive as long as OpenClaw is alive.
 - **Stale web embed references**: Removed orphaned `style.css` and `app.js` references from CMakeLists.txt and web_server.c (files were deleted in a prior commit but references remained).
 
 ### Documentation
 - **README rewritten**: Added repository structure, fixed quick start snippet (set-target, flash vs app-flash), updated MCP tools with auto-pairing, corrected requirements (Python 3, OpenClaw gateway).
 - **Quick Start guide**: Full 12-step zero-to-running setup for brand-new device + fresh Mac.
 - **Detailed Guide**: Complete feature reference covering all firmware, MCP, daemon, and Web UI features.
-- **EHOSTUNREACH daemon knowledgebase**: `docs/knowledgebase/ehostunreach-daemon-bug.md` documents the daemon-stuck-on-EHOSTUNREACH bug (likely ExpressVPN NKE), kickstart workaround, and investigation notes.
+- **EHOSTUNREACH daemon knowledgebase**: `docs/knowledgebase/ehostunreach-daemon-bug.md` — initially misdiagnosed as ExpressVPN process filtering, root cause confirmed on 2026-04-29 to be macOS Local Network permission (TCC) denied for the launchd-spawned `node` identity. Two `node` entries appear in System Settings → Privacy & Security → Local Network (one per launch context, since `node` is ad-hoc signed). One-toggle fix; doc includes diagnosis checklist and history.
 - **DOWN state sleep/wake plan**: `docs/superpowers/plans/2026-04-21-down-state-sleep-wake.md` archives the implementation plan behind the DOWN-state persistence fixes shipped this release.
 
 ---

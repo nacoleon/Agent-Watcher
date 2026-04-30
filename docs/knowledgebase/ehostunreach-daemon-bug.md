@@ -1,6 +1,6 @@
-# EHOSTUNREACH Daemon Hang — Likely VPN-Related
+# EHOSTUNREACH Daemon Hang — macOS Local Network Permission (TCC)
 
-## Status: Workaround known (2026-04-22). Root cause unconfirmed.
+## Status: ROOT CAUSE CONFIRMED — TCC Local Network permission denied for launchd-spawned node (2026-04-29)
 
 ## The Bug
 
@@ -8,98 +8,107 @@ The watcher-daemon Node.js process gets stuck reporting `EHOSTUNREACH 10.0.0.40:
 
 - `ping 10.0.0.40` works from the same Mac
 - `curl http://10.0.0.40/api/status` works from the same Mac
-- Other processes on the Mac can reach the Watcher fine
+- Other node processes launched from the shell reach the Watcher fine
 
-Mac reboot does NOT fix it. Manually restarting only the daemon does.
+Mac reboot does NOT fix it. Daemon restart sometimes fixes it transiently, sometimes doesn't.
 
-## Symptoms in Logs
+Voice input is broken while this is active (audio queues on the device but the daemon can't fetch it).
 
-```
-2026-04-22T16:14:02.468Z [openclaw-ws] WebSocket closed
-2026-04-22T16:14:03.464Z [poll] Watcher unreachable {"error":"connect EHOSTUNREACH 10.0.0.40:80 - Local (10.0.0.17:64827)"}
-2026-04-22T16:14:12.469Z [poll] Watcher unreachable {"error":"connect EHOSTUNREACH 10.0.0.40:80 - Local (10.0.0.17:64867)"}
-...
-```
+## Root Cause: macOS Sequoia Local Network permission
 
-Note the `Local (10.0.0.17:...)` — the daemon IS binding to the correct LAN source IP on `en1`. So at the socket level, it's using the right interface. Yet the kernel returns EHOSTUNREACH.
+macOS 13+ requires apps to be explicitly granted Local Network access (System Settings → Privacy & Security → Local Network). The permission is **per-TCC-identity**, not per-binary.
 
-## Workaround
+The `node` binary at `/opt/homebrew/bin/node` is **ad-hoc signed** (no Apple Developer ID). For ad-hoc-signed binaries, macOS creates a TCC identity tied to the launch context. As a result, **the same node binary spawned by Terminal vs. spawned by launchd ends up as TWO separate entries in the Local Network permission list**.
 
-```bash
-launchctl kickstart -k gui/$(id -u)/ai.openclaw.watcher-daemon
-```
+Verified on 2026-04-29: System Settings → Privacy & Security → Local Network showed two `node` entries. One was ON (Terminal-spawned), one was OFF (launchd-spawned daemon). Toggling the OFF one to ON immediately fixed the daemon — even with ExpressVPN active and connected.
 
-Daemon recovers immediately after restart. No Mac reboot needed.
+Why ExpressVPN looked like the cause:
+- ExpressVPN's NKE enforces Local Network permission stricter than the kernel does on its own
+- With VPN OFF, the kernel allowed the LAN traffic despite the missing permission
+- With VPN ON, the NKE checked TCC and denied → returned EHOSTUNREACH
+- We mistakenly thought the VPN was filtering by process lineage; really it was just enforcing the OS's permission decision
 
-## Prime Suspect: ExpressVPN
+## The Fix
 
-The Mac runs ExpressVPN, which installs a Network Kernel Extension and multiple `utun` interfaces (5 active at time of investigation: utun0-utun4). VPN clients cause exactly this symptom via several mechanisms:
+1. Open **System Settings → Privacy & Security → Local Network**
+2. Find the OFF `node` entry (there will be two — toggle the off one ON)
+3. Restart the daemon:
+   ```
+   launchctl kickstart -k gui/$(id -u)/ai.openclaw.watcher-daemon
+   ```
+4. Verify with `tail -f ~/.openclaw/watcher-daemon-logs/daemon-*.log` — should see `[poll] alive` lines, no EHOSTUNREACH
 
-1. **Routing table hijack** — VPN pushes default route that blackholes LAN traffic if 10.0.0.0/24 is not explicitly excluded. *Partially ruled out:* the daemon logs show `Local (10.0.0.17:...)` which means the socket was sourced from the LAN IP, not a utun IP.
+That's it. No code changes needed. Survives Mac reboots, VPN reconnects, etc.
 
-2. **Kill-switch / firewall at NKE layer** — ExpressVPN's Network Kernel Extension can block packets at L2/L3 even when routing is correct, returning EHOSTUNREACH. This fits the evidence: routing was correct but the kernel refused to deliver the packet.
+## Why daemon restart sometimes "worked" before
 
-3. **Per-process routing inconsistency** — macOS VPNs can route different processes through different paths. `curl` (short-lived, fresh socket) may be treated differently than the long-lived daemon process.
+When VPN was disconnecting/reconnecting, its NKE was briefly bypassing TCC checks. A daemon restart that happened to land in that window would succeed. Once VPN stabilized again, the NKE would resume enforcing TCC — but existing connections weren't always re-evaluated. So the daemon could appear healthy for hours after a "lucky" restart, then suddenly fail again.
 
-4. **Reconnect window** — when the VPN drops and reconnects, long-lived Node.js processes can get stuck in a bad socket state. Short-lived processes avoid it by starting fresh after reconnect completes.
+Without VPN, the kernel alone is more lenient about Local Network permission (it doesn't always block, especially for IP-literal connections to RFC1918 ranges). That's why the bug never showed up when VPN was off.
 
-## Why Mac Reboot Doesn't Help
-
-ExpressVPN auto-starts at boot and re-applies its routing/firewall rules. The daemon also auto-starts via LaunchAgent and immediately hits the same VPN-induced bad state. Manual daemon restart works because:
-- It happens after the VPN has fully stabilized
-- The daemon gets fresh sockets that happen to be treated correctly
-
-## How to Confirm When It Next Happens
-
-Before restarting the daemon:
+## Diagnosis Checklist (if this happens again)
 
 ```bash
-# Check routing for the Watcher — should show "interface: en1"
-route get 10.0.0.40
-
-# If it shows "interface: utun*" → VPN is hijacking the route
-# If it shows "interface: en1" but daemon still fails → kill-switch/NKE layer
-
-# Check if ExpressVPN is in a reconnecting state
-ifconfig | grep -E "^utun|^ppp"
-
-# Try curl from command line to confirm network is fine
+# 1. Is the device actually reachable?
 curl -s --max-time 3 http://10.0.0.40/api/status
+# If this fails, it's a real network issue.
+
+# 2. Routing not hijacked
+route get 10.0.0.40
+# Should show "interface: en1"
+
+# 3. Confirm shell-spawned node works
+/opt/homebrew/bin/node -e "require('http').get('http://10.0.0.40/api/status', r => console.log('OK', r.statusCode)).on('error', e => console.log('ERR', e.code))"
+# If this works but the daemon fails, it's TCC.
+
+# 4. Open System Settings → Privacy & Security → Local Network
+# Two `node` entries? Toggle the OFF one to ON. Done.
 ```
 
-## Settings to Check in ExpressVPN
+## Why two `node` entries
 
-- **Allow access to devices on the local network** — must be ON (Preferences → General)
-- **Split tunneling** — if enabled, ensure `node` (or the whole daemon) is in the "don't use VPN" list
+`node` is ad-hoc signed. macOS TCC tracks ad-hoc-signed binaries by a hash-based identifier that includes the launch context (responsible process). When launchd executes node, TCC assigns one identity. When Terminal executes node, TCC assigns a different identity. Both reference the same on-disk binary, but TCC treats them as separate apps.
+
+Verified via system log:
+```
+identifier=node-55554944a5c9bf5685733a0e9128c5a5e702b44d
+binary_path=/opt/homebrew/Cellar/node@22/22.22.1_3/bin/node
+```
 
 ## Not the Cause
 
 Confirmed NOT caused by:
-- Our reboot detection threshold fix (just a comparison change, doesn't touch networking)
-- Our MCP server orphan detection change (doesn't affect daemon at all)
-- Firmware changes (UI/state only; HTTP server unchanged; EHOSTUNREACH is a Mac kernel error anyway)
+- Reboot detection threshold fix in daemon.ts (just a comparison change)
+- MCP server orphan detection change (doesn't affect daemon networking)
+- Firmware changes (UI/state only; device HTTP server unchanged)
+- Stuck Node.js sockets (fresh daemon process hits the same TCC denial)
+- Mac network stack (curl/ping/shell-node all work)
+- ExpressVPN's split tunneling or "Allow LAN access" setting (both already correct)
+- Routing table hijack
+- macOS Network Lock / kill switch
 
-## Potential Fix (Intentionally Not Implemented Yet)
+## Symptoms in Logs
 
-Options considered:
-- **In-process recovery:** destroy the HTTP agent (`http.globalAgent.destroy()`) and recreate internal state after N consecutive network errors.
-- **Process-level recovery:** exit on N consecutive failures; LaunchAgent auto-restarts (`KeepAlive=true` in the plist). Simpler than in-process recovery.
+```
+[heartbeat] FAILED — watcher unreachable {"error":"connect EHOSTUNREACH 10.0.0.40:80 - Local (10.0.0.17:57079)"}
+[poll] Watcher unreachable {"error":"connect EHOSTUNREACH 10.0.0.40:80 - Local (10.0.0.17:63751)"}
+```
 
-### Why we're not adding it yet (decision 2026-04-22)
+Note `Local (10.0.0.17:...)` — the daemon is correctly binding to the LAN source IP. The block is at the OS permission layer, not the routing/socket layer.
 
-1. **It has happened once.** Adding defensive code for a single incident is premature.
-2. **It may mask the root cause.** If ExpressVPN's kill-switch/NKE is blocking the node process, a restart-loop might not even work — and we'd never see the real problem clearly.
-3. **Project is in maintenance mode** (no new features, critical bug fixes only). This isn't critical until it recurs.
-4. **Config fix might be sufficient.** If ExpressVPN's "Allow LAN access" was off, or `node` wasn't in split-tunneling exclusions, a settings change is the right fix — not code.
-
-### Decision sequence when it recurs
-
-1. Before restarting anything, run `route get 10.0.0.40` — capture whether the interface is `en1` or `utun*`.
-2. Check ExpressVPN settings (LAN access, split tunneling, kill-switch state).
-3. Only if the issue continues after VPN config is verified correct, add process-level self-healing (exit-and-restart via LaunchAgent is preferred over in-process recovery — simpler, more reliable).
+Downstream effect: if the MCP server's `heartbeat` tool call fails with EHOSTUNREACH for 1.5 hours, the firmware transitions to `PW_STATE_DOWN` and the Watcher displays the DOWN animation. With our 2026-04-24 firmware fix, the device automatically recovers to IDLE on the next successful heartbeat after the daemon comes back.
 
 ## Related Files
 
-- `watcher-mcp/src/daemon.ts` — the affected process
-- `~/Library/LaunchAgents/ai.openclaw.watcher-daemon.plist` — LaunchAgent config
-- `~/.openclaw/watcher-daemon-logs/` — where EHOSTUNREACH errors get logged
+- `watcher-mcp/src/daemon.ts` — affected process
+- `watcher-mcp/src/tools.ts` — contains the heartbeat tool that fails when this bug is active
+- `~/Library/LaunchAgents/ai.openclaw.watcher-daemon.plist` — LaunchAgent config (uses `/opt/homebrew/bin/node`)
+- `~/.openclaw/watcher-daemon-logs/` — EHOSTUNREACH errors logged here
+- `~/.openclaw/watcher-mcp-logs/` — heartbeat FAILED entries logged here
+
+## Occurrences
+
+- 2026-04-22 — First seen, misdiagnosed as VPN reconnect race
+- 2026-04-24 — Confirmed VPN-correlated but blamed VPN process filter
+- 2026-04-27 — Daemon restart didn't fix; voice input also broken
+- 2026-04-29 — Root cause identified as TCC; one-toggle fix
