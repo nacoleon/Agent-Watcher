@@ -31,3 +31,11 @@ CONFIG_FREERTOS_HZ=1000
 # Memory — match monitor/stock for Himax compatibility
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=262144
+
+# Task watchdog — auto-reset if the IDLE task is starved for 10s
+# (indicates a high-priority task is stuck in a tight loop without yielding)
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y

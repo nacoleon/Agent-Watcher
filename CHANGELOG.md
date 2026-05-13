@@ -5,6 +5,8 @@ All notable changes to Agent Watcher will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Scheduled nightly reboot**: Firmware reboots itself daily at 03:00 local time (Pacific, DST-aware) to prevent the daily-crash-and-freeze issue. Built on a new SNTP time-sync layer using `pool.ntp.org` and `time.google.com`, with POSIX TZ `PST8PDT,M3.2.0,M11.1.0`. Fallback: reboots after 25h uptime if SNTP never syncs. A 1-hour boot guard prevents reboot loops if the device happens to boot during the 03:00 window. `time_synced`, `current_time`, and `next_scheduled_reboot` exposed in `/api/status`.
+- **Task watchdog**: Enabled `CONFIG_ESP_TASK_WDT_INIT` with 10s timeout watching idle tasks on both cores. If a high-priority task starves idle for 10s straight (i.e. firmware is frozen), the chip auto-resets. Complements the scheduled reboot — scheduled reboot handles slow degradation, watchdog handles instant freezes.
 - **MCP server orphan detection**: MCP server polls its parent process every 30s; if the parent dies (gateway crash/restart), the orphaned MCP exits cleanly. Replaces the previous 5-minute idle timeout, which broke OpenClaw's cached MCP sessions and caused "Not connected" errors.
 
 ### Changed

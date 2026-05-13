@@ -18,6 +18,7 @@
 #include "himax_task.h"
 #include "web_server.h"
 #include "voice_input.h"
+#include "time_sync.h"
 
 static const char *TAG = "pokewatcher";
 
@@ -213,6 +214,7 @@ void app_main(void)
     // [7/7] WiFi + web server
     init_wifi();
     pw_web_server_start();
+    pw_time_sync_init();
     ESP_LOGI(TAG, "[7/7] WiFi + web server initialized");
 
     pw_agent_state_set_change_cb(on_state_changed);

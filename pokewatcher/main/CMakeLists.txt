@@ -9,6 +9,7 @@ idf_component_register(
         "dialog.c"
         "web_server.c"
         "voice_input.c"
+        "time_sync.c"
     INCLUDE_DIRS "."
     REQUIRES
         nvs_flash
@@ -27,6 +28,8 @@ idf_component_register(
         sensecap-watcher
         esp_io_expander_pca95xx_16bit
         esp_timer
+        esp_netif
+        lwip
         driver
     EMBED_FILES
         "web/index.html"

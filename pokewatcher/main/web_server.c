@@ -6,7 +6,9 @@
 #include "event_queue.h"
 #include "renderer.h"
 #include "voice_input.h"
+#include "time_sync.h"
 #include "config.h"
+#include <time.h>
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "esp_wifi.h"
@@ -146,6 +148,25 @@ static esp_err_t handle_api_status(httpd_req_t *req)
     cJSON_AddStringToObject(root, "response_mode", s_response_mode);
 
     cJSON_AddBoolToObject(root, "audio_ready", pw_voice_audio_ready());
+
+    // Time sync + scheduled reboot
+    cJSON_AddBoolToObject(root, "time_synced", pw_time_is_synced());
+    if (pw_time_is_synced()) {
+        char buf[32];
+        time_t now = time(NULL);
+        struct tm tm_local;
+        localtime_r(&now, &tm_local);
+        strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S%z", &tm_local);
+        cJSON_AddStringToObject(root, "current_time", buf);
+
+        time_t next_reboot = pw_time_next_reboot_epoch();
+        if (next_reboot > 0) {
+            struct tm tm_next;
+            localtime_r(&next_reboot, &tm_next);
+            strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S%z", &tm_next);
+            cJSON_AddStringToObject(root, "next_scheduled_reboot", buf);
+        }
+    }
 
     wifi_ap_record_t ap_info;
     if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
